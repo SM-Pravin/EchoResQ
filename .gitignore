@@ -1,0 +1,42 @@
+# === Project Specific Ignores ===
+
+# Research files
+R&D_FILES/
+
+# Large model folders
+WORKING_FILES/models/
+
+# Logs, samples, and temp chunks
+WORKING_FILES/logs/
+WORKING_FILES/audio_samples/
+WORKING_FILES/tmp_chunks/
+
+# === Python Ignores ===
+
+# Python cache & compiled files
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.env/
+
+# === Model & Checkpoint Files (ignore large files globally) ===
+*.h5
+*.safetensors
+*.pb
+*.pt
+*.pth
+*.ckpt
+
+# === Miscellaneous ===
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Jupyter & Streamlit
+.ipynb_checkpoints/
+.streamlit/
+
+
