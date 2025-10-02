@@ -87,12 +87,12 @@ try:
     from vosk import Model as VoskModel
     if os.path.isdir(VOSK_PATH):
         vosk_model = VoskModel(VOSK_PATH)
-        print(" ✅ Vosk model loaded")
+        print(" Vosk model loaded")
     else:
-        print(f" ⚠️ Vosk model not found at: {VOSK_PATH}")
+        print(f" WARNING: Vosk model not found at: {VOSK_PATH}")
         vosk_model = None
 except Exception as e:
-    print(f" ⚠️ Failed to initialize Vosk model: {e}")
+    print(f" WARNING: Failed to initialize Vosk model: {e}")
     vosk_model = None
 
 # --------------------
@@ -106,17 +106,17 @@ try:
             wav2vec_model = Wav2Vec2ForSequenceClassification.from_pretrained(WAV2VEC2_PATH, local_files_only=True)
             wav2vec_model.to(TORCH_DEVICE)
             wav2vec_model.eval()
-            print(" ✅ Wav2Vec2 model loaded (device: {})".format(TORCH_DEVICE))
+            print(" Wav2Vec2 model loaded (device: {})".format(TORCH_DEVICE))
         except Exception as e:
-            print(f" ⚠️ Failed to load Wav2Vec2 from {WAV2VEC2_PATH}: {e}")
+            print(f" WARNING: Failed to load Wav2Vec2 from {WAV2VEC2_PATH}: {e}")
             audio_feature_extractor = None
             wav2vec_model = None
     else:
-        print(f" ⚠️ Wav2Vec2 model folder not found at: {WAV2VEC2_PATH}")
+        print(f" WARNING: Wav2Vec2 model folder not found at: {WAV2VEC2_PATH}")
         audio_feature_extractor = None
         wav2vec_model = None
 except Exception as e:
-    print(f" ⚠️ Transformers not available or error loading wav2vec2: {e}")
+    print(f" WARNING: Transformers not available or error loading wav2vec2: {e}")
     audio_feature_extractor = None
     wav2vec_model = None
 
@@ -131,15 +131,15 @@ try:
             model = AutoModelForSequenceClassification.from_pretrained(DISTILROBERTA_PATH, local_files_only=True)
             model.to(TORCH_DEVICE)
             text_classifier = pipeline("text-classification", model=model, tokenizer=tok, device=PIPELINE_DEVICE)
-            print(" ✅ DistilRoBERTa loaded (device: {})".format(TORCH_DEVICE))
+            print(" DistilRoBERTa loaded (device: {})".format(TORCH_DEVICE))
         except Exception as e:
-            print(f" ⚠️ Failed to load DistilRoBERTa from {DISTILROBERTA_PATH}: {e}")
+            print(f" WARNING: Failed to load DistilRoBERTa from {DISTILROBERTA_PATH}: {e}")
             text_classifier = None
     else:
-        print(f" ⚠️ DistilRoBERTa model folder not found at: {DISTILROBERTA_PATH}")
+        print(f" WARNING: DistilRoBERTa model folder not found at: {DISTILROBERTA_PATH}")
         text_classifier = None
 except Exception as e:
-    print(f" ⚠️ Transformers not available or error loading DistilRoBERTa: {e}")
+    print(f" WARNING: Transformers not available or error loading DistilRoBERTa: {e}")
     text_classifier = None
 
 # --------------------
@@ -157,18 +157,18 @@ try:
                     yamnet_classes = [line.strip().split(",")[2] for line in lines]
             else:
                 yamnet_classes = []
-                print(f" ⚠️ YAMNet class map not found at {class_map_path}")
-            print(" ✅ YAMNet loaded")
+                print(f" WARNING: YAMNet class map not found at {class_map_path}")
+            print(" YAMNet loaded")
         except Exception as e:
-            print(f" ⚠️ Failed to load YAMNet from {YAMNET_PATH}: {e}")
+            print(f" WARNING: Failed to load YAMNet from {YAMNET_PATH}: {e}")
             yamnet_model = None
             yamnet_classes = []
     else:
-        print(f" ⚠️ YAMNet folder not found at: {YAMNET_PATH}")
+        print(f" WARNING: YAMNet folder not found at: {YAMNET_PATH}")
         yamnet_model = None
         yamnet_classes = []
 except Exception as e:
-    print(f" ⚠️ TensorFlow not available or error loading YAMNet: {e}")
+    print(f" WARNING: TensorFlow not available or error loading YAMNet: {e}")
     yamnet_model = None
     yamnet_classes = []
 
@@ -182,20 +182,20 @@ try:
     if os.path.isdir(local_embed_path):
         try:
             embedder = SentenceTransformer(local_embed_path, device=TORCH_DEVICE.type)
-            print(" ✅ SentenceTransformer loaded from local folder")
+            print(" SentenceTransformer loaded from local folder")
         except Exception:
             embedder = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
-            print(" ✅ SentenceTransformer loaded from cache/hub")
+            print(" SentenceTransformer loaded from cache/hub")
     else:
         # fallback to cached/hub model (this will require internet if not cached)
         try:
             embedder = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
-            print(" ✅ SentenceTransformer loaded")
+            print(" SentenceTransformer loaded")
         except Exception as e:
-            print(f" ⚠️ Failed to load SentenceTransformer: {e}")
+            print(f" WARNING: Failed to load SentenceTransformer: {e}")
             embedder = None
 except Exception as e:
-    print(f" ⚠️ sentence-transformers not available: {e}")
+    print(f" WARNING: sentence-transformers not available: {e}")
     embedder = None
 
 print("[INIT] All models initialized.\n")
