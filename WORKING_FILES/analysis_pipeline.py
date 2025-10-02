@@ -1,12 +1,12 @@
 """
 Main entrypoint for the emergency AI pipeline.
 Extended to:
+ - use VAD + in-memory chunking (no unnecessary disk I/O)
  - return per-chunk details for visualization
  - provide a streaming-style function that processes chunks sequentially
    and calls a user-supplied callback for each chunk (useful for live UI updates).
 """
 import os
-import sys
 import tempfile
 import warnings
 import traceback
@@ -45,11 +45,7 @@ CHUNK_SIZE_SECONDS = 30
 HOP_SIZE_SECONDS = 15
 SILENCE_RMS_THRESHOLD_RATIO = 0.06
 TEMP_DIR = "tmp_chunks"
-# Sleep bounds used only when simulate_realtime=True in streaming function
-STREAM_MIN_SLEEP = 0.15
-STREAM_MAX_SLEEP = 1.2
 
-# --- HELPER FUNCTIONS from original main.py (remove_temp_files, etc.) ---
 def remove_temp_files(prefix="chunk_"):
     try:
         import glob
@@ -62,10 +58,8 @@ def remove_temp_files(prefix="chunk_"):
     except Exception:
         pass
 
-
 def _safe_divide(a, b):
     return (a / b) if b else 0.0
-
 
 # --- MAIN PROCESSING FUNCTION ---
 def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False):
@@ -94,14 +88,14 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
         caller_id = os.path.basename(audio_file).split(".")[0].upper()
         results["caller_id"] = caller_id
 
-        # Full-file transcription
+        # Full-file transcription (unchanged)
         transcript = transcribe_audio(fixed_file) or ""
         results["transcript"] = transcript
 
         # Text emotion (full transcript)
         text_scores = analyze_text_emotion(transcript)
 
-        # FAST MODE
+        # FAST MODE (no chunk split or sound analysis)
         if fast_mode:
             audio_scores = analyze_audio_emotion(fixed_file)
             confidence, emotion, fused_scores = fuse_emotions(audio_scores, text_scores)
@@ -116,12 +110,9 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
             log_call(caller_id, transcript, emotion, distress, {"fused": fused_scores, "sounds": []}, results["reason"])
             return results
 
-        # --- FULL ANALYSIS (CHUNKED) ---
-        waveform, sr = librosa.load(fixed_file, sr=16000, mono=True)
-        if waveform is None or len(waveform) == 0:
-            waveform = np.zeros(1, dtype=np.float32)
-
-        chunks = split_audio_chunks(fixed_file, max_chunk=CHUNK_SIZE_SECONDS, overlap=int(HOP_SIZE_SECONDS))
+        # --- FULL ANALYSIS (CHUNKED, in-memory) ---
+        # Use in-memory chunking (applies VAD internally)
+        chunks = split_audio_chunks(fixed_file, max_chunk=CHUNK_SIZE_SECONDS, overlap=int(HOP_SIZE_SECONDS), in_memory=True)
 
         canonical_labels = ["angry", "happy", "neutral", "sad"]
         aggregated_fused = {k: 0.0 for k in canonical_labels}
@@ -131,34 +122,34 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
         final_distress = "low distress"
         final_emotion = "neutral"
 
-        # Precompute RMS for weighting
+        # Precompute RMS for weighting and durations
         max_rms = 0.0
         chunk_rms_map = {}
         chunk_duration_map = {}
-        for chunk_path in chunks:
-            try:
-                y, s = sf.read(chunk_path, dtype="float32")
-                if y.ndim > 1: y = y.mean(axis=1)
-                rms = float(np.sqrt(np.mean(y**2))) if y.size > 0 else 0.0
-                chunk_rms_map[chunk_path] = rms
-                duration = len(y) / float(s) if s > 0 else 0.0
-                chunk_duration_map[chunk_path] = duration
-                if rms > max_rms: max_rms = rms
-            except Exception:
-                chunk_rms_map[chunk_path] = 0.0
-                chunk_duration_map[chunk_path] = 0.0
+
+        for idx, chunk in enumerate(chunks):
+            y = chunk.get("data", np.array([], dtype=np.float32))
+            sr = chunk.get("sr", 16000)
+            # mono already
+            rms = float(np.sqrt(np.mean(y**2))) if y.size > 0 else 0.0
+            chunk_rms_map[idx] = rms
+            chunk_duration_map[idx] = float(len(y) / float(sr)) if sr > 0 and y.size > 0 else 0.0
+            if rms > max_rms: max_rms = rms
 
         silence_thresh = max_rms * SILENCE_RMS_THRESHOLD_RATIO if max_rms > 0 else 0.0
 
         chunks_info = []
 
-        # Analyze each chunk
-        for idx, chunk_path in enumerate(chunks):
-            start_s = idx * (CHUNK_SIZE_SECONDS - HOP_SIZE_SECONDS)
-            end_s = start_s + chunk_duration_map.get(chunk_path, CHUNK_SIZE_SECONDS)
-            rms = chunk_rms_map.get(chunk_path, 0.0)
+        # Analyze each chunk (in-memory)
+        for idx, chunk in enumerate(chunks):
+            start_s = chunk.get("start_s", idx * (CHUNK_SIZE_SECONDS - HOP_SIZE_SECONDS))
+            end_s = chunk.get("end_s", start_s + chunk_duration_map.get(idx, CHUNK_SIZE_SECONDS))
+            y = chunk.get("data", np.array([], dtype=np.float32))
+            sr = chunk.get("sr", 16000)
+            rms = chunk_rms_map.get(idx, 0.0)
+
+            # skip silent chunks
             if max_rms > 0 and rms < silence_thresh:
-                # still add a quiet chunk info for timeline (optional)
                 chunks_info.append({
                     "index": idx, "start_s": float(start_s), "end_s": float(end_s),
                     "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
@@ -168,10 +159,10 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
                 continue
 
             try:
-                audio_scores = analyze_audio_emotion(chunk_path)
+                audio_scores = analyze_audio_emotion(y, sr=sr)
                 win_conf, win_emotion, win_fused = fuse_emotions(audio_scores, {})
 
-                win_sounds = analyze_sound_events(chunk_path) or []
+                win_sounds = analyze_sound_events({"data": y, "sr": sr}) or []
                 if win_sounds:
                     sound_events_all.extend(win_sounds)
 
@@ -194,7 +185,7 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
                 })
 
             except Exception as e:
-                print(f" ⚠️ Error processing chunk {chunk_path}: {e}")
+                print(f" ⚠️ Error processing chunk {idx}: {e}")
                 chunks_info.append({
                     "index": idx, "start_s": float(start_s), "end_s": float(end_s),
                     "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
@@ -237,7 +228,7 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
         results["error"] = str(e)
         return results
     finally:
-        # Cleanup temp files
+        # Cleanup temp file
         if fixed_file and os.path.exists(fixed_file):
             try:
                 os.remove(fixed_file)
@@ -262,7 +253,6 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
 
     Returns the final result dict (same shape as process_audio_file).
     """
-    # Reuse much of process_audio_file but stream chunks to callback
     final_results = {
         "caller_id": "UNKNOWN", "transcript": "", "emotion": "UNKNOWN",
         "confidence": 0.0, "distress": "low distress", "sounds": [],
@@ -285,7 +275,6 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
         text_scores = analyze_text_emotion(transcript)
 
         if fast_mode:
-            # fast_mode stream -> just call single 'chunk' update once
             audio_scores = analyze_audio_emotion(fixed_file)
             conf, emo, fused = fuse_emotions(audio_scores, text_scores)
             distress = get_distress_token(emo, conf)
@@ -306,8 +295,8 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
             log_call(caller_id, transcript, emo, distress, {"fused": fused, "sounds": []}, "fast stream")
             return final_results
 
-        # FULL chunked stream
-        chunks = split_audio_chunks(fixed_file, max_chunk=chunk_size_seconds, overlap=int(hop_size_seconds))
+        # Full chunked processing using in-memory chunks
+        chunks = split_audio_chunks(fixed_file, max_chunk=chunk_size_seconds, overlap=int(hop_size_seconds), in_memory=True)
         canonical_labels = ["angry", "happy", "neutral", "sad"]
         aggregated_fused = {k: 0.0 for k in canonical_labels}
         total_weight = 0.0
@@ -320,26 +309,23 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
         max_rms = 0.0
         chunk_rms_map = {}
         chunk_duration_map = {}
-        for chunk_path in chunks:
-            try:
-                y, s = sf.read(chunk_path, dtype="float32")
-                if y.ndim > 1: y = y.mean(axis=1)
-                rms = float(np.sqrt(np.mean(y**2))) if y.size > 0 else 0.0
-                chunk_rms_map[chunk_path] = rms
-                duration = len(y) / float(s) if s > 0 else 0.0
-                chunk_duration_map[chunk_path] = duration
-                if rms > max_rms: max_rms = rms
-            except Exception:
-                chunk_rms_map[chunk_path] = 0.0
-                chunk_duration_map[chunk_path] = 0.0
+        for idx, chunk in enumerate(chunks):
+            y = chunk.get("data", np.array([], dtype=np.float32))
+            sr = chunk.get("sr", 16000)
+            rms = float(np.sqrt(np.mean(y**2))) if y.size > 0 else 0.0
+            chunk_rms_map[idx] = rms
+            chunk_duration_map[idx] = float(len(y) / float(sr)) if sr > 0 and y.size > 0 else 0.0
+            if rms > max_rms: max_rms = rms
 
         silence_thresh = max_rms * SILENCE_RMS_THRESHOLD_RATIO if max_rms > 0 else 0.0
         chunk_results = []
 
-        for idx, chunk_path in enumerate(chunks):
-            start_s = idx * (chunk_size_seconds - hop_size_seconds)
-            end_s = start_s + chunk_duration_map.get(chunk_path, chunk_size_seconds)
-            rms = chunk_rms_map.get(chunk_path, 0.0)
+        for idx, chunk in enumerate(chunks):
+            start_s = chunk.get("start_s", idx * (chunk_size_seconds - hop_size_seconds))
+            end_s = chunk.get("end_s", start_s + chunk_duration_map.get(idx, chunk_size_seconds))
+            y = chunk.get("data", np.array([], dtype=np.float32))
+            sr = chunk.get("sr", 16000)
+            rms = chunk_rms_map.get(idx, 0.0)
 
             if max_rms > 0 and rms < silence_thresh:
                 chunk_result = {
@@ -353,17 +339,16 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
                         chunk_callback(chunk_result)
                     except Exception:
                         pass
-                # optionally simulate a small delay to allow UI updates
                 if simulate_realtime:
-                    sleep_for = min(max(chunk_duration_map.get(chunk_path, 0.2) * 0.4, STREAM_MIN_SLEEP), STREAM_MAX_SLEEP)
+                    sleep_for = min(max(chunk_duration_map.get(idx, 0.2) * 0.4, 0.15), 1.2)
                     time.sleep(sleep_for)
                 continue
 
             try:
-                audio_scores = analyze_audio_emotion(chunk_path)
+                audio_scores = analyze_audio_emotion(y, sr=sr)
                 win_conf, win_emotion, win_fused = fuse_emotions(audio_scores, {})
 
-                win_sounds = analyze_sound_events(chunk_path) or []
+                win_sounds = analyze_sound_events({"data": y, "sr": sr}) or []
                 if win_sounds:
                     sound_events_all.extend(win_sounds)
 
@@ -394,11 +379,11 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
                         pass
 
                 if simulate_realtime:
-                    sleep_for = min(max(chunk_duration_map.get(chunk_path, 0.2) * 0.4, STREAM_MIN_SLEEP), STREAM_MAX_SLEEP)
+                    sleep_for = min(max(chunk_duration_map.get(idx, 0.2) * 0.4, 0.15), 1.2)
                     time.sleep(sleep_for)
 
             except Exception as e:
-                print(f" ⚠️ Error streaming chunk {chunk_path}: {e}")
+                print(f" ⚠️ Error streaming chunk {idx}: {e}")
                 chunk_result = {
                     "index": idx, "start_s": float(start_s), "end_s": float(end_s),
                     "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
@@ -411,7 +396,7 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
                     except Exception:
                         pass
                 if simulate_realtime:
-                    time.sleep(STREAM_MIN_SLEEP)
+                    time.sleep(0.15)
                 continue
 
         # Normalize aggregated scores

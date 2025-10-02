@@ -27,8 +27,14 @@ except Exception:
     pass
 
 import traceback
+import torch
 
-# Import heavy libs inside try/except to allow graceful degradation
+# Device selection for PyTorch models
+TORCH_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# For huggingface pipeline device argument: 0 for cuda:0, -1 for CPU
+PIPELINE_DEVICE = 0 if TORCH_DEVICE.type == "cuda" else -1
+
+# Initialize model refs
 vosk_model = None
 audio_feature_extractor = None
 wav2vec_model = None
@@ -44,7 +50,7 @@ WAV2VEC2_PATH = os.path.join(BASE, "wav2vec2")
 DISTILROBERTA_PATH = os.path.join(BASE, "distilroberta")
 YAMNET_PATH = os.path.join(BASE, "yamnet")
 
-print("[INIT] Loading models...")
+print("[INIT] Loading models... device:", TORCH_DEVICE)
 
 # --------------------
 # VOSK (Speech-to-Text)
@@ -70,8 +76,9 @@ try:
         try:
             audio_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(WAV2VEC2_PATH, local_files_only=True)
             wav2vec_model = Wav2Vec2ForSequenceClassification.from_pretrained(WAV2VEC2_PATH, local_files_only=True)
+            wav2vec_model.to(TORCH_DEVICE)
             wav2vec_model.eval()
-            print(" ✅ Wav2Vec2 model loaded")
+            print(" ✅ Wav2Vec2 model loaded (device: {})".format(TORCH_DEVICE))
         except Exception as e:
             print(f" ⚠️ Failed to load Wav2Vec2 from {WAV2VEC2_PATH}: {e}")
             audio_feature_extractor = None
@@ -94,8 +101,9 @@ try:
         try:
             tok = AutoTokenizer.from_pretrained(DISTILROBERTA_PATH, local_files_only=True)
             model = AutoModelForSequenceClassification.from_pretrained(DISTILROBERTA_PATH, local_files_only=True)
-            text_classifier = pipeline("text-classification", model=model, tokenizer=tok)
-            print(" ✅ DistilRoBERTa loaded")
+            model.to(TORCH_DEVICE)
+            text_classifier = pipeline("text-classification", model=model, tokenizer=tok, device=PIPELINE_DEVICE)
+            print(" ✅ DistilRoBERTa loaded (device: {})".format(TORCH_DEVICE))
         except Exception as e:
             print(f" ⚠️ Failed to load DistilRoBERTa from {DISTILROBERTA_PATH}: {e}")
             text_classifier = None
@@ -145,15 +153,15 @@ try:
     local_embed_path = os.path.join(BASE, "all-MiniLM-L6-v2")
     if os.path.isdir(local_embed_path):
         try:
-            embedder = SentenceTransformer(local_embed_path)
+            embedder = SentenceTransformer(local_embed_path, device=TORCH_DEVICE.type)
             print(" ✅ SentenceTransformer loaded from local folder")
         except Exception:
-            embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            embedder = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
             print(" ✅ SentenceTransformer loaded from cache/hub")
     else:
         # fallback to cached/hub model (this will require internet if not cached)
         try:
-            embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            embedder = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
             print(" ✅ SentenceTransformer loaded")
         except Exception as e:
             print(f" ⚠️ Failed to load SentenceTransformer: {e}")
@@ -163,4 +171,3 @@ except Exception as e:
     embedder = None
 
 print("[INIT] All models initialized.\n")
-
