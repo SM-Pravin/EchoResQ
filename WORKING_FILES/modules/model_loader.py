@@ -29,10 +29,38 @@ except Exception:
 import traceback
 import torch
 
+# Enhanced device selection with user control
+def get_optimal_device():
+    """Get optimal device based on availability and environment settings."""
+    force_cpu = os.environ.get("FORCE_CPU", "false").lower() == "true"
+    if force_cpu:
+        return torch.device("cpu")
+    
+    if torch.cuda.is_available():
+        # Check if GPU has enough memory (at least 2GB free)
+        try:
+            import subprocess
+            result = subprocess.run(['nvidia-smi', '--query-gpu=memory.free', '--format=csv,nounits,noheader'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                free_memory = int(result.stdout.strip().split('\n')[0])
+                if free_memory > 2048:  # 2GB minimum
+                    return torch.device("cuda")
+        except Exception:
+            pass
+        
+        # Fallback: just check if CUDA is available
+        return torch.device("cuda")
+    
+    return torch.device("cpu")
+
 # Device selection for PyTorch models
-TORCH_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+TORCH_DEVICE = get_optimal_device()
+USE_GPU = TORCH_DEVICE.type == "cuda"
 # For huggingface pipeline device argument: 0 for cuda:0, -1 for CPU
-PIPELINE_DEVICE = 0 if TORCH_DEVICE.type == "cuda" else -1
+PIPELINE_DEVICE = 0 if USE_GPU else -1
+
+print(f"[DEVICE] Selected device: {TORCH_DEVICE} (GPU enabled: {USE_GPU})")
 
 # Initialize model refs
 vosk_model = None

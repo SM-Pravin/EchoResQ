@@ -5,9 +5,14 @@ import soundfile as sf
 import librosa
 from vosk import KaldiRecognizer
 from modules.model_loader import vosk_model
+from modules.keyword_detector import EMERGENCY_KEYWORDS
 
 TARGET_SR = 16000
 FRAME_SECONDS = 0.5  # feed Vosk 0.5s frames
+
+# Streaming configuration
+STREAMING_BUFFER_SIZE = int(TARGET_SR * 2.0)  # 2 second buffer for streaming
+PARTIAL_EMIT_THRESHOLD = 0.3  # seconds of audio before emitting partial results
 
 def transcribe_audio(audio_path, sample_rate=TARGET_SR):
     """
@@ -72,4 +77,193 @@ def transcribe_audio(audio_path, sample_rate=TARGET_SR):
         # Don't crash main; upstream handles empty transcript
         print(f" ⚠️ Error in Vosk transcription: {e}")
         return ""
+
+
+def transcribe_audio_streaming(audio_path, partial_callback=None, keyword_callback=None, sample_rate=TARGET_SR):
+    """
+    Streaming transcription with partial results and early keyword detection.
+    
+    Args:
+        audio_path: path to audio file
+        partial_callback: function called with partial transcription results
+        keyword_callback: function called when emergency keywords are detected
+        sample_rate: target sampling rate
+    
+    Returns:
+        dict with:
+            - final_transcript: complete transcription
+            - partial_results: list of partial results
+            - keywords_detected: list of (keyword, timestamp) tuples
+    """
+    if vosk_model is None:
+        return {"final_transcript": "", "partial_results": [], "keywords_detected": []}
+
+    results = {
+        "final_transcript": "",
+        "partial_results": [],
+        "keywords_detected": []
+    }
+
+    try:
+        # Load and prepare audio
+        audio, sr = sf.read(audio_path, dtype="float32")
+        if audio.ndim > 1:
+            audio = np.mean(audio, axis=1)
+
+        if sr != sample_rate:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=sample_rate)
+            sr = sample_rate
+
+        # Normalize
+        maxv = float(np.max(np.abs(audio))) if audio.size > 0 else 1.0
+        if maxv > 0:
+            audio = audio / maxv
+
+        # Convert to PCM16
+        pcm16 = (audio * 32767.0).astype('<i2')
+        
+        rec = KaldiRecognizer(vosk_model, sample_rate)
+        rec.SetWords(True)
+
+        transcript_parts = []
+        frame_size = int(FRAME_SECONDS * sample_rate)
+        time_offset = 0.0
+        
+        for i in range(0, len(pcm16), frame_size):
+            frame = pcm16[i:i+frame_size].tobytes()
+            current_time = i / sample_rate
+            
+            if rec.AcceptWaveform(frame):
+                try:
+                    res = json.loads(rec.Result())
+                    text = res.get("text", "")
+                    if text:
+                        transcript_parts.append(text)
+                        
+                        # Check for emergency keywords
+                        text_lower = text.lower()
+                        for keyword in EMERGENCY_KEYWORDS:
+                            if keyword.lower() in text_lower:
+                                keyword_detection = (keyword, current_time)
+                                results["keywords_detected"].append(keyword_detection)
+                                if keyword_callback:
+                                    try:
+                                        keyword_callback(keyword, current_time, text)
+                                    except Exception:
+                                        pass
+                        
+                        # Add to results
+                        results["partial_results"].append({
+                            "text": text,
+                            "timestamp": current_time,
+                            "is_final": True
+                        })
+                        
+                        if partial_callback:
+                            try:
+                                partial_callback(text, current_time, True)
+                            except Exception:
+                                pass
+                                
+                except Exception:
+                    pass
+            else:
+                # Partial result
+                try:
+                    partial_res = json.loads(rec.PartialResult())
+                    partial_text = partial_res.get("partial", "")
+                    if partial_text and current_time >= PARTIAL_EMIT_THRESHOLD:
+                        
+                        # Check partial text for urgent keywords
+                        partial_lower = partial_text.lower()
+                        for keyword in EMERGENCY_KEYWORDS:
+                            if keyword.lower() in partial_lower:
+                                keyword_detection = (keyword, current_time)
+                                results["keywords_detected"].append(keyword_detection)
+                                if keyword_callback:
+                                    try:
+                                        keyword_callback(keyword, current_time, partial_text)
+                                    except Exception:
+                                        pass
+                        
+                        results["partial_results"].append({
+                            "text": partial_text,
+                            "timestamp": current_time,
+                            "is_final": False
+                        })
+                        
+                        if partial_callback:
+                            try:
+                                partial_callback(partial_text, current_time, False)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+        # Final result
+        try:
+            final_res = json.loads(rec.FinalResult())
+            if "text" in final_res and final_res["text"]:
+                final_text = final_res["text"]
+                transcript_parts.append(final_text)
+                
+                # Final keyword check
+                final_lower = final_text.lower()
+                for keyword in EMERGENCY_KEYWORDS:
+                    if keyword.lower() in final_lower:
+                        keyword_detection = (keyword, len(pcm16) / sample_rate)
+                        results["keywords_detected"].append(keyword_detection)
+                        if keyword_callback:
+                            try:
+                                keyword_callback(keyword, len(pcm16) / sample_rate, final_text)
+                            except Exception:
+                                pass
+                
+                results["partial_results"].append({
+                    "text": final_text,
+                    "timestamp": len(pcm16) / sample_rate,
+                    "is_final": True
+                })
+        except Exception:
+            pass
+
+        results["final_transcript"] = " ".join([t for t in transcript_parts if t]).strip()
+        return results
+
+    except Exception as e:
+        print(f" ⚠️ Error in streaming transcription: {e}")
+        return results
+
+
+def check_emergency_keywords_realtime(text, timestamp=0.0):
+    """
+    Quick emergency keyword detection for real-time processing.
+    Returns list of (keyword, severity) tuples found in text.
+    """
+    if not text:
+        return []
+    
+    detected = []
+    text_lower = text.lower()
+    
+    # High priority keywords (immediate response needed)
+    high_priority = ["help", "emergency", "fire", "police", "ambulance", "911", "urgent", "crisis"]
+    
+    # Critical keywords (life-threatening)
+    critical = ["dying", "suicide", "kill", "murder", "rape", "attack", "bomb", "gun", "knife"]
+    
+    for keyword in critical:
+        if keyword in text_lower:
+            detected.append((keyword, "critical"))
+    
+    for keyword in high_priority:
+        if keyword in text_lower:
+            detected.append((keyword, "high"))
+    
+    # Check EMERGENCY_KEYWORDS for medium priority
+    for keyword in EMERGENCY_KEYWORDS:
+        if keyword.lower() in text_lower and not any(kw[0] == keyword for kw in detected):
+            detected.append((keyword, "medium"))
+    
+    return detected
 
