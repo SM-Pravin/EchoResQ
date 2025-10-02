@@ -1,16 +1,19 @@
 """
 Main entrypoint for the emergency AI pipeline.
 Extended to:
- - use VAD + in-memory chunking (no unnecessary disk I/O)
- - return per-chunk details for visualization
- - provide a streaming-style function that processes chunks sequentially
-   and calls a user-supplied callback for each chunk (useful for live UI updates).
+ - parallelize per-chunk analysis (ProcessPoolExecutor, spawn context)
+ - preserve streaming behavior (sequential when simulating realtime)
+ - use in-memory chunking (no unnecessary disk I/O)
+ - return per-chunk details for visualization and callback use
 """
+
 import os
 import tempfile
 import warnings
 import traceback
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 
 # Environment tweaks should be set early
 os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
@@ -40,11 +43,23 @@ from modules.keyword_detector import check_keywords, severity_level
 from modules.sound_event_detector import analyze_sound_events
 from modules.logger import log_call
 
-# Parameters
+# Parameters (kept from original)
 CHUNK_SIZE_SECONDS = 30
 HOP_SIZE_SECONDS = 15
 SILENCE_RMS_THRESHOLD_RATIO = 0.06
 TEMP_DIR = "tmp_chunks"
+
+# Environment-controlled parallelism:
+# Set PARALLEL_MAX_WORKERS env var to control worker count; defaults to os.cpu_count()
+def _get_max_workers():
+    try:
+        v = os.environ.get("PARALLEL_MAX_WORKERS")
+        if v:
+            return max(1, int(v))
+    except Exception:
+        pass
+    return max(1, (os.cpu_count() or 1))
+
 
 def remove_temp_files(prefix="chunk_"):
     try:
@@ -58,8 +73,134 @@ def remove_temp_files(prefix="chunk_"):
     except Exception:
         pass
 
+
 def _safe_divide(a, b):
     return (a / b) if b else 0.0
+
+
+# ----------------------
+# Worker function
+# ----------------------
+def _analyze_chunk_worker(args):
+    """
+    Worker entrypoint for a single chunk.
+    Args is a tuple:
+      (idx, chunk_dict, max_rms, silence_thresh, canonical_labels)
+    Returns dict shaped like a single chunk result.
+    NOTE: keep imports inside the function to avoid pickling issues.
+    """
+    try:
+        idx, chunk, max_rms, silence_thresh, canonical_labels = args
+
+        import numpy as _np
+        # local imports to avoid pickling issues
+        from modules.emotion_audio import analyze_audio_emotion as _analyze_audio_emotion
+        from modules.fusion_engine import fuse_emotions as _fuse_emotions
+        from modules.sound_event_detector import analyze_sound_events as _analyze_sound_events
+        from modules.distress_mapper import get_distress_token as _get_distress_token
+
+        y = chunk.get("data", _np.array([], dtype=_np.float32))
+        sr = int(chunk.get("sr", 16000) or 16000)
+        rms = float(_np.sqrt(_np.mean(y**2))) if y.size > 0 else 0.0
+        start_s = float(chunk.get("start_s", 0.0))
+        end_s = float(chunk.get("end_s", start_s + (len(y) / float(sr) if sr > 0 else 0.0)))
+
+        # skip silent chunks
+        if max_rms > 0 and rms < silence_thresh:
+            return {
+                "index": idx,
+                "start_s": float(start_s),
+                "end_s": float(end_s),
+                "rms": float(rms),
+                "win_emotion": None,
+                "win_conf": 0.0,
+                "win_fused": {k: 0.0 for k in canonical_labels},
+                "win_distress": "low distress",
+                "sounds": []
+            }
+
+        # run audio emotion model
+        audio_scores = _analyze_audio_emotion(y, sr=sr) or {}
+        win_conf, win_emotion, win_fused = _fuse_emotions(audio_scores, {})
+
+        # run sound event detector
+        win_sounds = _analyze_sound_events({"data": y, "sr": sr}) or []
+
+        # map to distress token
+        win_distress = _get_distress_token(win_emotion, win_conf)
+
+        return {
+            "index": idx,
+            "start_s": float(start_s),
+            "end_s": float(end_s),
+            "rms": float(rms),
+            "win_emotion": win_emotion,
+            "win_conf": float(win_conf),
+            "win_fused": {k: float(win_fused.get(k, 0.0)) for k in canonical_labels},
+            "win_distress": win_distress,
+            "sounds": win_sounds
+        }
+
+    except Exception:
+        # On any failure inside a worker, return a safe default chunk result
+        return {
+            "index": int(args[0] if args else 0),
+            "start_s": 0.0,
+            "end_s": 0.0,
+            "rms": 0.0,
+            "win_emotion": None,
+            "win_conf": 0.0,
+            "win_fused": {k: 0.0 for k in (args[4] if len(args) > 4 else ["angry","happy","neutral","sad"])},
+            "win_distress": "low distress",
+            "sounds": []
+        }
+
+
+def analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=None):
+    """
+    Run _analyze_chunk_worker concurrently for all chunks and return
+    a list of chunk result dicts ordered by chunk index.
+    """
+    if not chunks:
+        return []
+
+    max_workers = int(max_workers or _get_max_workers())
+    # Build argument tuples
+    job_args = [
+        (int(chunk.get("index", idx)), chunk, float(max_rms), float(silence_thresh), list(canonical_labels))
+        for idx, chunk in enumerate(chunks)
+    ]
+
+    results = []
+    # Prefer spawn context for safety (especially when TF/CUDA present)
+    try:
+        ctx = multiprocessing.get_context("spawn")
+    except Exception:
+        ctx = None
+
+    # Create executor with mp_context when available (Python >= 3.7)
+    try:
+        if ctx is not None:
+            with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as ex:
+                futures = [ex.submit(_analyze_chunk_worker, a) for a in job_args]
+                for fut in as_completed(futures):
+                    results.append(fut.result())
+        else:
+            with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                futures = [ex.submit(_analyze_chunk_worker, a) for a in job_args]
+                for fut in as_completed(futures):
+                    results.append(fut.result())
+    except Exception as e:
+        # Fallback: If parallel executor fails (rare), run sequentially
+        # This ensures the pipeline remains robust on minimal systems.
+        results = []
+        for a in job_args:
+            results.append(_analyze_chunk_worker(a))
+
+    # Ensure results are ordered by index (chunks may finish out of order)
+    results.sort(key=lambda d: int(d.get("index", 0)))
+    return results
+
 
 # --- MAIN PROCESSING FUNCTION ---
 def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False):
@@ -111,7 +252,6 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
             return results
 
         # --- FULL ANALYSIS (CHUNKED, in-memory) ---
-        # Use in-memory chunking (applies VAD internally)
         chunks = split_audio_chunks(fixed_file, max_chunk=CHUNK_SIZE_SECONDS, overlap=int(HOP_SIZE_SECONDS), in_memory=True)
 
         canonical_labels = ["angry", "happy", "neutral", "sad"]
@@ -129,8 +269,7 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
 
         for idx, chunk in enumerate(chunks):
             y = chunk.get("data", np.array([], dtype=np.float32))
-            sr = chunk.get("sr", 16000)
-            # mono already
+            sr = int(chunk.get("sr", 16000) or 16000)
             rms = float(np.sqrt(np.mean(y**2))) if y.size > 0 else 0.0
             chunk_rms_map[idx] = rms
             chunk_duration_map[idx] = float(len(y) / float(sr)) if sr > 0 and y.size > 0 else 0.0
@@ -138,61 +277,32 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
 
         silence_thresh = max_rms * SILENCE_RMS_THRESHOLD_RATIO if max_rms > 0 else 0.0
 
-        chunks_info = []
+        # Parallel chunk analysis (safe fallback to sequential inside helper)
+        max_workers = _get_max_workers()
+        chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=max_workers)
 
-        # Analyze each chunk (in-memory)
-        for idx, chunk in enumerate(chunks):
-            start_s = chunk.get("start_s", idx * (CHUNK_SIZE_SECONDS - HOP_SIZE_SECONDS))
-            end_s = chunk.get("end_s", start_s + chunk_duration_map.get(idx, CHUNK_SIZE_SECONDS))
-            y = chunk.get("data", np.array([], dtype=np.float32))
-            sr = chunk.get("sr", 16000)
-            rms = chunk_rms_map.get(idx, 0.0)
+        # Aggregate results (same logic as before)
+        for c in chunks_info:
+            rms = float(c.get("rms", 0.0))
+            # sounds
+            win_sounds = c.get("sounds", []) or []
+            if win_sounds:
+                sound_events_all.extend(win_sounds)
 
-            # skip silent chunks
-            if max_rms > 0 and rms < silence_thresh:
-                chunks_info.append({
-                    "index": idx, "start_s": float(start_s), "end_s": float(end_s),
-                    "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
-                    "win_fused": {k: 0.0 for k in canonical_labels}, "win_distress": "low distress",
-                    "sounds": []
-                })
-                continue
+            win_distress = c.get("win_distress", "low distress")
+            win_conf = float(c.get("win_conf", 0.0) or 0.0)
+            win_emotion = c.get("win_emotion", None)
 
-            try:
-                audio_scores = analyze_audio_emotion(y, sr=sr)
-                win_conf, win_emotion, win_fused = fuse_emotions(audio_scores, {})
+            if severity_level(win_distress) < severity_level(final_distress):
+                final_distress = win_distress
+                final_emotion = win_emotion
+                reason = f"emotion escalation (chunk {c.get('index')}): {win_emotion} ({win_conf:.2f})"
 
-                win_sounds = analyze_sound_events({"data": y, "sr": sr}) or []
-                if win_sounds:
-                    sound_events_all.extend(win_sounds)
-
-                win_distress = get_distress_token(win_emotion, win_conf)
-                if severity_level(win_distress) < severity_level(final_distress):
-                    final_distress = win_distress
-                    final_emotion = win_emotion
-                    reason = f"emotion escalation (chunk {idx}): {win_emotion} ({win_conf:.2f})"
-
-                weight = rms if max_rms > 0 else 1.0
-                for k in canonical_labels:
-                    aggregated_fused[k] += win_fused.get(k, 0.0) * weight
-                total_weight += weight
-
-                chunks_info.append({
-                    "index": idx, "start_s": float(start_s), "end_s": float(end_s),
-                    "rms": float(rms), "win_emotion": win_emotion, "win_conf": float(win_conf),
-                    "win_fused": {k: float(win_fused.get(k, 0.0)) for k in canonical_labels},
-                    "win_distress": win_distress, "sounds": win_sounds
-                })
-
-            except Exception as e:
-                print(f" ⚠️ Error processing chunk {idx}: {e}")
-                chunks_info.append({
-                    "index": idx, "start_s": float(start_s), "end_s": float(end_s),
-                    "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
-                    "win_fused": {k: 0.0 for k in canonical_labels}, "win_distress": "low distress",
-                    "sounds": []
-                })
-                continue
+            weight = rms if max_rms > 0 else 1.0
+            win_fused = c.get("win_fused", {}) or {}
+            for k in canonical_labels:
+                aggregated_fused[k] += win_fused.get(k, 0.0) * weight
+            total_weight += weight
 
         # Normalize aggregated scores
         aggregated_audio_scores = {k: _safe_divide(aggregated_fused[k], total_weight) for k in canonical_labels} if total_weight > 0 else {}
@@ -206,11 +316,9 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
             reason = f"keyword escalation: {distress_after_kw}"
             distress = distress_after_kw
 
-        # Check against chunk-level escalations
         if severity_level(final_distress) < severity_level(distress):
             distress = final_distress
 
-        # Safe fallback
         if distress not in ["peak emergency distress", "high distress", "medium distress", "low distress"]:
             distress = "low distress"
 
@@ -235,7 +343,7 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
             except Exception:
                 pass
         remove_temp_files()
-        
+
 
 # --- STREAMING / SIMULATED REALTIME PROCESSOR ---
 def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
@@ -243,15 +351,7 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
                               hop_size_seconds=HOP_SIZE_SECONDS):
     """
     Processes a file and calls `chunk_callback(chunk_result)` for each processed chunk.
-    Useful to update a UI in near-real-time.
-
-    chunk_callback receives a dict:
-      {
-        "index", "start_s", "end_s", "rms",
-        "win_emotion", "win_conf", "win_fused", "win_distress", "sounds"
-      }
-
-    Returns the final result dict (same shape as process_audio_file).
+    Uses parallel processing when simulate_realtime==False (i.e., batch processing mode).
     """
     final_results = {
         "caller_id": "UNKNOWN", "transcript": "", "emotion": "UNKNOWN",
@@ -311,7 +411,7 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
         chunk_duration_map = {}
         for idx, chunk in enumerate(chunks):
             y = chunk.get("data", np.array([], dtype=np.float32))
-            sr = chunk.get("sr", 16000)
+            sr = int(chunk.get("sr", 16000) or 16000)
             rms = float(np.sqrt(np.mean(y**2))) if y.size > 0 else 0.0
             chunk_rms_map[idx] = rms
             chunk_duration_map[idx] = float(len(y) / float(sr)) if sr > 0 and y.size > 0 else 0.0
@@ -320,84 +420,116 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
         silence_thresh = max_rms * SILENCE_RMS_THRESHOLD_RATIO if max_rms > 0 else 0.0
         chunk_results = []
 
-        for idx, chunk in enumerate(chunks):
-            start_s = chunk.get("start_s", idx * (chunk_size_seconds - hop_size_seconds))
-            end_s = chunk.get("end_s", start_s + chunk_duration_map.get(idx, chunk_size_seconds))
-            y = chunk.get("data", np.array([], dtype=np.float32))
-            sr = chunk.get("sr", 16000)
-            rms = chunk_rms_map.get(idx, 0.0)
-
-            if max_rms > 0 and rms < silence_thresh:
-                chunk_result = {
-                    "index": idx, "start_s": float(start_s), "end_s": float(end_s),
-                    "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
-                    "win_fused": {k: 0.0 for k in canonical_labels}, "win_distress": "low distress", "sounds": []
-                }
-                chunk_results.append(chunk_result)
+        # If simulate_realtime==False, process chunks in parallel (batch mode)
+        if not simulate_realtime:
+            chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=_get_max_workers())
+            for c in chunks_info:
+                # same aggregation/emit logic used earlier
+                chunk_results.append(c)
                 if chunk_callback:
                     try:
-                        chunk_callback(chunk_result)
+                        chunk_callback(c)
                     except Exception:
                         pass
-                if simulate_realtime:
-                    sleep_for = min(max(chunk_duration_map.get(idx, 0.2) * 0.4, 0.15), 1.2)
-                    time.sleep(sleep_for)
-                continue
-
-            try:
-                audio_scores = analyze_audio_emotion(y, sr=sr)
-                win_conf, win_emotion, win_fused = fuse_emotions(audio_scores, {})
-
-                win_sounds = analyze_sound_events({"data": y, "sr": sr}) or []
+            # now aggregate like process_audio_file
+            for c in chunks_info:
+                rms = float(c.get("rms", 0.0))
+                win_sounds = c.get("sounds", []) or []
                 if win_sounds:
                     sound_events_all.extend(win_sounds)
-
-                win_distress = get_distress_token(win_emotion, win_conf)
+                win_distress = c.get("win_distress", "low distress")
+                win_conf = float(c.get("win_conf", 0.0) or 0.0)
+                win_emotion = c.get("win_emotion", None)
                 if severity_level(win_distress) < severity_level(final_distress):
                     final_distress = win_distress
                     final_emotion = win_emotion
-                    reason = f"emotion escalation (chunk {idx}): {win_emotion} ({win_conf:.2f})"
-
+                    reason = f"emotion escalation (chunk {c.get('index')}): {win_emotion} ({win_conf:.2f})"
                 weight = rms if max_rms > 0 else 1.0
+                win_fused = c.get("win_fused", {}) or {}
                 for k in canonical_labels:
                     aggregated_fused[k] += win_fused.get(k, 0.0) * weight
                 total_weight += weight
 
-                chunk_result = {
-                    "index": idx, "start_s": float(start_s), "end_s": float(end_s),
-                    "rms": float(rms), "win_emotion": win_emotion, "win_conf": float(win_conf),
-                    "win_fused": {k: float(win_fused.get(k, 0.0)) for k in canonical_labels},
-                    "win_distress": win_distress, "sounds": win_sounds
-                }
+        else:
+            # sequential (real-time simulation) — keep original behavior with sleeps & callbacks
+            for idx, chunk in enumerate(chunks):
+                start_s = chunk.get("start_s", idx * (chunk_size_seconds - hop_size_seconds))
+                end_s = chunk.get("end_s", start_s + chunk_duration_map.get(idx, chunk_size_seconds))
+                y = chunk.get("data", np.array([], dtype=np.float32))
+                sr = int(chunk.get("sr", 16000) or 16000)
+                rms = chunk_rms_map.get(idx, 0.0)
 
-                chunk_results.append(chunk_result)
+                if max_rms > 0 and rms < silence_thresh:
+                    chunk_result = {
+                        "index": idx, "start_s": float(start_s), "end_s": float(end_s),
+                        "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
+                        "win_fused": {k: 0.0 for k in canonical_labels}, "win_distress": "low distress", "sounds": []
+                    }
+                    chunk_results.append(chunk_result)
+                    if chunk_callback:
+                        try:
+                            chunk_callback(chunk_result)
+                        except Exception:
+                            pass
+                    if simulate_realtime:
+                        sleep_for = min(max(chunk_duration_map.get(idx, 0.2) * 0.4, 0.15), 1.2)
+                        time.sleep(sleep_for)
+                    continue
 
-                if chunk_callback:
-                    try:
-                        chunk_callback(chunk_result)
-                    except Exception:
-                        pass
+                try:
+                    audio_scores = analyze_audio_emotion(y, sr=sr)
+                    win_conf, win_emotion, win_fused = fuse_emotions(audio_scores, {})
 
-                if simulate_realtime:
-                    sleep_for = min(max(chunk_duration_map.get(idx, 0.2) * 0.4, 0.15), 1.2)
-                    time.sleep(sleep_for)
+                    win_sounds = analyze_sound_events({"data": y, "sr": sr}) or []
+                    if win_sounds:
+                        sound_events_all.extend(win_sounds)
 
-            except Exception as e:
-                print(f" ⚠️ Error streaming chunk {idx}: {e}")
-                chunk_result = {
-                    "index": idx, "start_s": float(start_s), "end_s": float(end_s),
-                    "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
-                    "win_fused": {k: 0.0 for k in canonical_labels}, "win_distress": "low distress", "sounds": []
-                }
-                chunk_results.append(chunk_result)
-                if chunk_callback:
-                    try:
-                        chunk_callback(chunk_result)
-                    except Exception:
-                        pass
-                if simulate_realtime:
-                    time.sleep(0.15)
-                continue
+                    win_distress = get_distress_token(win_emotion, win_conf)
+                    if severity_level(win_distress) < severity_level(final_distress):
+                        final_distress = win_distress
+                        final_emotion = win_emotion
+                        reason = f"emotion escalation (chunk {idx}): {win_emotion} ({win_conf:.2f})"
+
+                    weight = rms if max_rms > 0 else 1.0
+                    for k in canonical_labels:
+                        aggregated_fused[k] += win_fused.get(k, 0.0) * weight
+                    total_weight += weight
+
+                    chunk_result = {
+                        "index": idx, "start_s": float(start_s), "end_s": float(end_s),
+                        "rms": float(rms), "win_emotion": win_emotion, "win_conf": float(win_conf),
+                        "win_fused": {k: float(win_fused.get(k, 0.0)) for k in canonical_labels},
+                        "win_distress": win_distress, "sounds": win_sounds
+                    }
+
+                    chunk_results.append(chunk_result)
+
+                    if chunk_callback:
+                        try:
+                            chunk_callback(chunk_result)
+                        except Exception:
+                            pass
+
+                    if simulate_realtime:
+                        sleep_for = min(max(chunk_duration_map.get(idx, 0.2) * 0.4, 0.15), 1.2)
+                        time.sleep(sleep_for)
+
+                except Exception as e:
+                    print(f" ⚠️ Error streaming chunk {idx}: {e}")
+                    chunk_result = {
+                        "index": idx, "start_s": float(start_s), "end_s": float(end_s),
+                        "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
+                        "win_fused": {k: 0.0 for k in canonical_labels}, "win_distress": "low distress", "sounds": []
+                    }
+                    chunk_results.append(chunk_result)
+                    if chunk_callback:
+                        try:
+                            chunk_callback(chunk_result)
+                        except Exception:
+                            pass
+                    if simulate_realtime:
+                        time.sleep(0.15)
+                    continue
 
         # Normalize aggregated scores
         aggregated_audio_scores = {k: _safe_divide(aggregated_fused[k], total_weight) for k in canonical_labels} if total_weight > 0 else {}
