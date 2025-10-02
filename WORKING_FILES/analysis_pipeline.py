@@ -49,6 +49,10 @@ HOP_SIZE_SECONDS = 15
 SILENCE_RMS_THRESHOLD_RATIO = 0.06
 TEMP_DIR = "tmp_chunks"
 
+# Batch processing parameters
+ENABLE_BATCH_PROCESSING = os.environ.get("ENABLE_BATCH_PROCESSING", "true").lower() == "true"
+AUDIO_BATCH_SIZE = int(os.environ.get("AUDIO_BATCH_SIZE", "8"))
+
 # Environment-controlled parallelism:
 # Set PARALLEL_MAX_WORKERS env var to control worker count; defaults to os.cpu_count()
 def _get_max_workers():
@@ -79,26 +83,59 @@ def _safe_divide(a, b):
 
 
 # ----------------------
-# Worker function
+# Worker function with model initialization
 # ----------------------
+
+# Global worker state to avoid reloading models per chunk
+_worker_models = None
+
+def _init_worker_models():
+    """Initialize models in worker process once on startup."""
+    global _worker_models
+    if _worker_models is not None:
+        return
+    
+    import os
+    # Set environment variables for model loading in worker
+    os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")  # Force CPU in workers for stability
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    
+    try:
+        # Import all necessary modules and models
+        from modules.emotion_audio import analyze_audio_emotion
+        from modules.fusion_engine import fuse_emotions
+        from modules.sound_event_detector import analyze_sound_events
+        from modules.distress_mapper import get_distress_token
+        
+        _worker_models = {
+            'analyze_audio_emotion': analyze_audio_emotion,
+            'fuse_emotions': fuse_emotions,
+            'analyze_sound_events': analyze_sound_events,
+            'get_distress_token': get_distress_token
+        }
+    except Exception as e:
+        print(f"⚠️ Worker failed to initialize models: {e}")
+        _worker_models = {}
+
 def _analyze_chunk_worker(args):
     """
-    Worker entrypoint for a single chunk.
+    Enhanced worker entrypoint for a single chunk with pre-loaded models.
     Args is a tuple:
       (idx, chunk_dict, max_rms, silence_thresh, canonical_labels)
     Returns dict shaped like a single chunk result.
-    NOTE: keep imports inside the function to avoid pickling issues.
     """
+    global _worker_models
+    
     try:
         idx, chunk, max_rms, silence_thresh, canonical_labels = args
+        
+        # Ensure models are initialized
+        if _worker_models is None:
+            _init_worker_models()
 
         import numpy as _np
-        # local imports to avoid pickling issues
-        from modules.emotion_audio import analyze_audio_emotion as _analyze_audio_emotion
-        from modules.fusion_engine import fuse_emotions as _fuse_emotions
-        from modules.sound_event_detector import analyze_sound_events as _analyze_sound_events
-        from modules.distress_mapper import get_distress_token as _get_distress_token
-
+        
         y = chunk.get("data", _np.array([], dtype=_np.float32))
         sr = int(chunk.get("sr", 16000) or 16000)
         rms = float(_np.sqrt(_np.mean(y**2))) if y.size > 0 else 0.0
@@ -119,15 +156,15 @@ def _analyze_chunk_worker(args):
                 "sounds": []
             }
 
-        # run audio emotion model
-        audio_scores = _analyze_audio_emotion(y, sr=sr) or {}
-        win_conf, win_emotion, win_fused = _fuse_emotions(audio_scores, {})
+        # Use pre-loaded model functions
+        audio_scores = _worker_models.get('analyze_audio_emotion', lambda *args, **kwargs: {})(y, sr=sr) or {}
+        win_conf, win_emotion, win_fused = _worker_models.get('fuse_emotions', lambda *args, **kwargs: (0.0, None, {}))(audio_scores, {})
 
         # run sound event detector
-        win_sounds = _analyze_sound_events({"data": y, "sr": sr}) or []
+        win_sounds = _worker_models.get('analyze_sound_events', lambda *args, **kwargs: [])({"data": y, "sr": sr}) or []
 
         # map to distress token
-        win_distress = _get_distress_token(win_emotion, win_conf)
+        win_distress = _worker_models.get('get_distress_token', lambda *args, **kwargs: "low distress")(win_emotion, win_conf)
 
         return {
             "index": idx,
@@ -141,7 +178,8 @@ def _analyze_chunk_worker(args):
             "sounds": win_sounds
         }
 
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ Worker error processing chunk {args[0] if args else 'unknown'}: {e}")
         # On any failure inside a worker, return a safe default chunk result
         return {
             "index": int(args[0] if args else 0),
@@ -178,19 +216,27 @@ def analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels
     except Exception:
         ctx = None
 
-    # Create executor with mp_context when available (Python >= 3.7)
+    # Create executor with initializer to pre-load models in workers
     try:
         if ctx is not None:
-            with ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx) as ex:
+            with ProcessPoolExecutor(
+                max_workers=max_workers, 
+                mp_context=ctx,
+                initializer=_init_worker_models
+            ) as ex:
                 futures = [ex.submit(_analyze_chunk_worker, a) for a in job_args]
                 for fut in as_completed(futures):
                     results.append(fut.result())
         else:
-            with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            with ProcessPoolExecutor(
+                max_workers=max_workers,
+                initializer=_init_worker_models
+            ) as ex:
                 futures = [ex.submit(_analyze_chunk_worker, a) for a in job_args]
                 for fut in as_completed(futures):
                     results.append(fut.result())
     except Exception as e:
+        print(f"⚠️ Parallel processing failed, falling back to sequential: {e}")
         # Fallback: If parallel executor fails (rare), run sequentially
         # This ensures the pipeline remains robust on minimal systems.
         results = []
@@ -200,6 +246,106 @@ def analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels
     # Ensure results are ordered by index (chunks may finish out of order)
     results.sort(key=lambda d: int(d.get("index", 0)))
     return results
+
+
+def analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels):
+    """
+    Batch-enabled chunk analysis that processes non-silent chunks in batches for efficiency.
+    Falls back to individual processing if batch processing fails.
+    """
+    if not chunks or not ENABLE_BATCH_PROCESSING:
+        return analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels)
+    
+    try:
+        from modules.emotion_audio import analyze_audio_emotion_batch
+        from modules.fusion_engine import fuse_emotions
+        from modules.sound_event_detector import analyze_sound_events
+        from modules.distress_mapper import get_distress_token
+        
+        results = []
+        audio_inputs = []
+        chunk_indices = []
+        
+        # Prepare chunks and filter out silent ones
+        for idx, chunk in enumerate(chunks):
+            y = chunk.get("data", np.array([], dtype=np.float32))
+            sr = int(chunk.get("sr", 16000) or 16000)
+            rms = float(np.sqrt(np.mean(y**2))) if y.size > 0 else 0.0
+            start_s = float(chunk.get("start_s", 0.0))
+            end_s = float(chunk.get("end_s", start_s + (len(y) / float(sr) if sr > 0 else 0.0)))
+            
+            if max_rms > 0 and rms < silence_thresh:
+                # Add silent chunk result directly
+                results.append({
+                    "index": idx,
+                    "start_s": start_s,
+                    "end_s": end_s,
+                    "rms": rms,
+                    "win_emotion": None,
+                    "win_conf": 0.0,
+                    "win_fused": {k: 0.0 for k in canonical_labels},
+                    "win_distress": "low distress",
+                    "sounds": []
+                })
+            else:
+                # Collect for batch processing
+                audio_inputs.append({"data": y, "sr": sr})
+                chunk_indices.append((idx, chunk, rms, start_s, end_s))
+        
+        if audio_inputs:
+            # Batch process audio emotion analysis
+            batch_audio_scores = analyze_audio_emotion_batch(audio_inputs, sr=16000, max_batch_size=AUDIO_BATCH_SIZE)
+            
+            # Process each result
+            for i, (idx, chunk, rms, start_s, end_s) in enumerate(chunk_indices):
+                try:
+                    y = chunk.get("data", np.array([], dtype=np.float32))
+                    sr = int(chunk.get("sr", 16000) or 16000)
+                    
+                    # Get batch result
+                    audio_scores = batch_audio_scores[i] if i < len(batch_audio_scores) else {}
+                    win_conf, win_emotion, win_fused = fuse_emotions(audio_scores, {})
+                    
+                    # Sound events still processed individually (YAMNet doesn't batch well)
+                    win_sounds = analyze_sound_events({"data": y, "sr": sr}) or []
+                    
+                    # Map to distress token
+                    win_distress = get_distress_token(win_emotion, win_conf)
+                    
+                    results.append({
+                        "index": idx,
+                        "start_s": start_s,
+                        "end_s": end_s,
+                        "rms": rms,
+                        "win_emotion": win_emotion,
+                        "win_conf": float(win_conf),
+                        "win_fused": {k: float(win_fused.get(k, 0.0)) for k in canonical_labels},
+                        "win_distress": win_distress,
+                        "sounds": win_sounds
+                    })
+                    
+                except Exception as e:
+                    print(f"⚠️ Error processing batch chunk {idx}: {e}")
+                    # Add error result
+                    results.append({
+                        "index": idx,
+                        "start_s": start_s,
+                        "end_s": end_s,
+                        "rms": rms,
+                        "win_emotion": None,
+                        "win_conf": 0.0,
+                        "win_fused": {k: 0.0 for k in canonical_labels},
+                        "win_distress": "low distress",
+                        "sounds": []
+                    })
+        
+        # Sort by index
+        results.sort(key=lambda d: int(d.get("index", 0)))
+        return results
+        
+    except Exception as e:
+        print(f"⚠️ Batch processing failed, falling back to parallel: {e}")
+        return analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels)
 
 
 # --- MAIN PROCESSING FUNCTION ---
@@ -277,9 +423,12 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
 
         silence_thresh = max_rms * SILENCE_RMS_THRESHOLD_RATIO if max_rms > 0 else 0.0
 
-        # Parallel chunk analysis (safe fallback to sequential inside helper)
-        max_workers = _get_max_workers()
-        chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=max_workers)
+        # Choose processing method: batch > parallel > sequential
+        if ENABLE_BATCH_PROCESSING and len(chunks) >= 2:
+            chunks_info = analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels)
+        else:
+            max_workers = _get_max_workers()
+            chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=max_workers)
 
         # Aggregate results (same logic as before)
         for c in chunks_info:
@@ -420,9 +569,12 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
         silence_thresh = max_rms * SILENCE_RMS_THRESHOLD_RATIO if max_rms > 0 else 0.0
         chunk_results = []
 
-        # If simulate_realtime==False, process chunks in parallel (batch mode)
+        # If simulate_realtime==False, process chunks in batch/parallel mode
         if not simulate_realtime:
-            chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=_get_max_workers())
+            if ENABLE_BATCH_PROCESSING and len(chunks) >= 2:
+                chunks_info = analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels)
+            else:
+                chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=_get_max_workers())
             for c in chunks_info:
                 # same aggregation/emit logic used earlier
                 chunk_results.append(c)
