@@ -15,6 +15,13 @@ KEYWORD_MAP = {
     "help me": "high distress",
 }
 
+# Emergency keywords list for streaming detection
+EMERGENCY_KEYWORDS = list(KEYWORD_MAP.keys()) + [
+    "emergency", "help", "911", "urgent", "crisis", "dying", "suicide", 
+    "kill", "murder", "rape", "attack", "bomb", "knife", "police", 
+    "ambulance", "medical", "hurt", "pain", "sick", "overdose"
+]
+
 SEVERITY_ORDER = {
     "peak emergency distress": 1,
     "high distress": 2,
