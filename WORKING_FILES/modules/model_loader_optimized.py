@@ -64,8 +64,8 @@ TORCH_DEVICE = get_optimal_device()
 USE_GPU = TORCH_DEVICE.type == "cuda"
 PIPELINE_DEVICE = 0 if USE_GPU else -1
 
-# Model paths - adjusted for actual structure
-BASE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+# Model paths
+BASE = os.path.join(os.getcwd(), "models")
 VOSK_PATH = os.path.join(BASE, "vosk-model-large-en-us")
 WAV2VEC2_PATH = os.path.join(BASE, "wav2vec2")
 DISTILROBERTA_PATH = os.path.join(BASE, "distilroberta")
