@@ -1,4 +1,4 @@
-# modules/model_loader_optimized.py
+# modules/model_loader.py
 """
 Optimized model loader that prevents duplicate loading in Streamlit and other scenarios.
 Thread-safe singleton pattern ensures models are loaded only once.
@@ -36,6 +36,7 @@ except Exception:
     pass
 
 import torch
+from modules import env_config as cfg
 
 # Enhanced device selection
 def get_optimal_device():
@@ -70,124 +71,190 @@ VOSK_PATH = os.path.join(BASE, "vosk-model-large-en-us")
 WAV2VEC2_PATH = os.path.join(BASE, "wav2vec2")
 DISTILROBERTA_PATH = os.path.join(BASE, "distilroberta")
 YAMNET_PATH = os.path.join(BASE, "yamnet")
+ONNX_DIR = cfg.get_onnx_model_dir(os.path.join(BASE, "optimized"))
 
-def _load_models():
-    """Load all models with thread safety."""
-    global _models_initialized, _models
-    
-    if _models_initialized:
-        return _models
-    
-    with _loading_lock:
-        if _models_initialized:  # Double-check pattern
-            return _models
-        
-        print(f"[DEVICE] Selected device: {TORCH_DEVICE} (GPU enabled: {USE_GPU})")
-        print("[INIT] Loading models... device:", TORCH_DEVICE)
-        
-        # Initialize model dictionary
+def _init_model_dict():
+    global _models
+    if not _models:
         _models = {
             'vosk_model': None,
             'audio_feature_extractor': None,
             'wav2vec_model': None,
+            'wav2vec_onnx': None,
             'text_classifier': None,
+            'text_onnx': None,
             'yamnet_model': None,
             'yamnet_classes': [],
             'embedder': None,
             'TORCH_DEVICE': TORCH_DEVICE,
             'USE_GPU': USE_GPU,
-            'PIPELINE_DEVICE': PIPELINE_DEVICE
+            'PIPELINE_DEVICE': PIPELINE_DEVICE,
         }
-        
-        # Load VOSK model
-        try:
-            from vosk import Model as VoskModel
-            if os.path.isdir(VOSK_PATH):
-                _models['vosk_model'] = VoskModel(VOSK_PATH)
-                print(" Vosk model loaded")
-            else:
-                print(f" WARNING: Vosk model not found at: {VOSK_PATH}")
-        except Exception as e:
-            print(f" WARNING: Failed to initialize Vosk model: {e}")
-        
-        # Load Wav2Vec2 model
-        try:
-            from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
-            if os.path.isdir(WAV2VEC2_PATH):
-                try:
-                    _models['audio_feature_extractor'] = Wav2Vec2FeatureExtractor.from_pretrained(WAV2VEC2_PATH, local_files_only=True)
-                    _models['wav2vec_model'] = Wav2Vec2ForSequenceClassification.from_pretrained(WAV2VEC2_PATH, local_files_only=True)
-                    _models['wav2vec_model'].to(TORCH_DEVICE)
-                    _models['wav2vec_model'].eval()
-                    print(" Wav2Vec2 model loaded (device: {})".format(TORCH_DEVICE))
-                except Exception as e:
-                    print(f" WARNING: Failed to load Wav2Vec2 from {WAV2VEC2_PATH}: {e}")
-            else:
-                print(f" WARNING: Wav2Vec2 model folder not found at: {WAV2VEC2_PATH}")
-        except Exception as e:
-            print(f" WARNING: Transformers not available or error loading wav2vec2: {e}")
-        
-        # Load DistilRoBERTa model
-        try:
-            from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
-            if os.path.isdir(DISTILROBERTA_PATH):
-                try:
-                    tok = AutoTokenizer.from_pretrained(DISTILROBERTA_PATH, local_files_only=True)
-                    model = AutoModelForSequenceClassification.from_pretrained(DISTILROBERTA_PATH, local_files_only=True)
-                    model.to(TORCH_DEVICE)
-                    _models['text_classifier'] = pipeline("text-classification", model=model, tokenizer=tok, device=PIPELINE_DEVICE)
-                    print(" DistilRoBERTa loaded (device: {})".format(TORCH_DEVICE))
-                except Exception as e:
-                    print(f" WARNING: Failed to load DistilRoBERTa from {DISTILROBERTA_PATH}: {e}")
-            else:
-                print(f" WARNING: DistilRoBERTa model folder not found at: {DISTILROBERTA_PATH}")
-        except Exception as e:
-            print(f" WARNING: Transformers not available or error loading DistilRoBERTa: {e}")
-        
-        # Load YAMNet model
-        try:
-            import tensorflow as tf
-            if os.path.isdir(YAMNET_PATH):
-                try:
-                    _models['yamnet_model'] = tf.saved_model.load(YAMNET_PATH)
-                    class_map_path = os.path.join(YAMNET_PATH, "yamnet_class_map.csv")
-                    if os.path.isfile(class_map_path):
-                        with open(class_map_path, "r") as f:
-                            lines = f.readlines()[1:]
-                            _models['yamnet_classes'] = [line.strip().split(",")[2] for line in lines]
-                    else:
-                        print(f" WARNING: YAMNet class map not found at {class_map_path}")
-                    print(" YAMNet loaded")
-                except Exception as e:
-                    print(f" WARNING: Failed to load YAMNet from {YAMNET_PATH}: {e}")
-            else:
-                print(f" WARNING: YAMNet folder not found at: {YAMNET_PATH}")
-        except Exception as e:
-            print(f" WARNING: TensorFlow not available or error loading YAMNet: {e}")
-        
-        # Load SentenceTransformer
-        try:
-            from sentence_transformers import SentenceTransformer
-            local_embed_path = os.path.join(BASE, "all-MiniLM-L6-v2")
-            if os.path.isdir(local_embed_path):
-                try:
-                    _models['embedder'] = SentenceTransformer(local_embed_path, device=TORCH_DEVICE.type)
-                    print(" SentenceTransformer loaded from local folder")
-                except Exception:
-                    _models['embedder'] = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
-                    print(" SentenceTransformer loaded from cache/hub")
-            else:
-                try:
-                    _models['embedder'] = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
-                    print(" SentenceTransformer loaded")
-                except Exception as e:
-                    print(f" WARNING: Failed to load SentenceTransformer: {e}")
-        except Exception as e:
-            print(f" WARNING: sentence-transformers not available: {e}")
-        
-        _models_initialized = True
-        print("[INIT] All models initialized.\n")
-        
+
+
+def _load_vosk():
+    try:
+        from vosk import Model as VoskModel
+        if os.path.isdir(VOSK_PATH):
+            _models['vosk_model'] = VoskModel(VOSK_PATH)
+            print(" Vosk model loaded")
+        else:
+            print(f" WARNING: Vosk model not found at: {VOSK_PATH}")
+    except Exception as e:
+        print(f" WARNING: Failed to initialize Vosk model: {e}")
+
+
+def _load_wav2vec2():
+    try:
+        from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassification
+        if os.path.isdir(WAV2VEC2_PATH):
+            try:
+                _models['audio_feature_extractor'] = Wav2Vec2FeatureExtractor.from_pretrained(WAV2VEC2_PATH, local_files_only=True)
+                _models['wav2vec_model'] = Wav2Vec2ForSequenceClassification.from_pretrained(WAV2VEC2_PATH, local_files_only=True)
+                _models['wav2vec_model'].to(TORCH_DEVICE)
+                _models['wav2vec_model'].eval()
+                print(" Wav2Vec2 model loaded (device: {})".format(TORCH_DEVICE))
+            except Exception as e:
+                print(f" WARNING: Failed to load Wav2Vec2 from {WAV2VEC2_PATH}: {e}")
+        else:
+            print(f" WARNING: Wav2Vec2 model folder not found at: {WAV2VEC2_PATH}")
+    except Exception as e:
+        print(f" WARNING: Transformers not available or error loading wav2vec2: {e}")
+
+
+def _load_wav2vec2_onnx():
+    """Load ONNX runtime session for Wav2Vec2 emotion model."""
+    try:
+        import onnxruntime as ort
+        # Determine providers
+        use_cuda_pref = cfg.get_use_onnx_cuda("auto").lower()
+        providers = ['CPUExecutionProvider']
+        if use_cuda_pref in ("true", "auto") and torch.cuda.is_available():
+            providers.insert(0, 'CUDAExecutionProvider')
+        onnx_path = os.path.join(ONNX_DIR, "wav2vec2_emotion.onnx")
+        if os.path.isfile(onnx_path):
+            _models['wav2vec_onnx'] = ort.InferenceSession(onnx_path, providers=providers)
+            print(f" ONNX Wav2Vec2 session loaded (providers: {providers})")
+        else:
+            print(f" WARNING: ONNX Wav2Vec2 model not found at {onnx_path}")
+    except Exception as e:
+        print(f" WARNING: Failed to load ONNX Wav2Vec2: {e}")
+
+
+def _load_distilroberta():
+    try:
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
+        if os.path.isdir(DISTILROBERTA_PATH):
+            try:
+                tok = AutoTokenizer.from_pretrained(DISTILROBERTA_PATH, local_files_only=True)
+                model = AutoModelForSequenceClassification.from_pretrained(DISTILROBERTA_PATH, local_files_only=True)
+                model.to(TORCH_DEVICE)
+                _models['text_classifier'] = pipeline("text-classification", model=model, tokenizer=tok, device=PIPELINE_DEVICE)
+                print(" DistilRoBERTa loaded (device: {})".format(TORCH_DEVICE))
+            except Exception as e:
+                print(f" WARNING: Failed to load DistilRoBERTa from {DISTILROBERTA_PATH}: {e}")
+        else:
+            print(f" WARNING: DistilRoBERTa model folder not found at: {DISTILROBERTA_PATH}")
+    except Exception as e:
+        print(f" WARNING: Transformers not available or error loading DistilRoBERTa: {e}")
+
+
+def _load_distilroberta_onnx():
+    """Load ONNX runtime session for DistilRoBERTa text emotion model."""
+    try:
+        import onnxruntime as ort
+        use_cuda_pref = cfg.get_use_onnx_cuda("auto").lower()
+        providers = ['CPUExecutionProvider']
+        if use_cuda_pref in ("true", "auto") and torch.cuda.is_available():
+            providers.insert(0, 'CUDAExecutionProvider')
+        onnx_path = os.path.join(ONNX_DIR, "distilroberta_emotion.onnx")
+        if os.path.isfile(onnx_path):
+            _models['text_onnx'] = ort.InferenceSession(onnx_path, providers=providers)
+            print(f" ONNX DistilRoBERTa session loaded (providers: {providers})")
+        else:
+            print(f" WARNING: ONNX DistilRoBERTa model not found at {onnx_path}")
+    except Exception as e:
+        print(f" WARNING: Failed to load ONNX DistilRoBERTa: {e}")
+
+
+def _load_yamnet():
+    try:
+        import tensorflow as tf
+        if os.path.isdir(YAMNET_PATH):
+            try:
+                _models['yamnet_model'] = tf.saved_model.load(YAMNET_PATH)
+                class_map_path = os.path.join(YAMNET_PATH, "yamnet_class_map.csv")
+                if os.path.isfile(class_map_path):
+                    with open(class_map_path, "r") as f:
+                        lines = f.readlines()[1:]
+                        _models['yamnet_classes'] = [line.strip().split(",")[2] for line in lines]
+                else:
+                    print(f" WARNING: YAMNet class map not found at {class_map_path}")
+                print(" YAMNet loaded")
+            except Exception as e:
+                print(f" WARNING: Failed to load YAMNet from {YAMNET_PATH}: {e}")
+        else:
+            print(f" WARNING: YAMNet folder not found at: {YAMNET_PATH}")
+    except Exception as e:
+        print(f" WARNING: TensorFlow not available or error loading YAMNet: {e}")
+
+
+def _load_embedder():
+    try:
+        from sentence_transformers import SentenceTransformer
+        local_embed_path = os.path.join(BASE, "all-MiniLM-L6-v2")
+        if os.path.isdir(local_embed_path):
+            try:
+                _models['embedder'] = SentenceTransformer(local_embed_path, device=TORCH_DEVICE.type)
+                print(" SentenceTransformer loaded from local folder")
+            except Exception:
+                _models['embedder'] = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
+                print(" SentenceTransformer loaded from cache/hub")
+        else:
+            try:
+                _models['embedder'] = SentenceTransformer("all-MiniLM-L6-v2", device=TORCH_DEVICE.type)
+                print(" SentenceTransformer loaded")
+            except Exception as e:
+                print(f" WARNING: Failed to load SentenceTransformer: {e}")
+    except Exception as e:
+        print(f" WARNING: sentence-transformers not available: {e}")
+
+
+_MODEL_LOADERS = {
+    'vosk_model': _load_vosk,
+    'audio_feature_extractor': _load_wav2vec2,
+    'wav2vec_model': _load_wav2vec2,
+    'wav2vec_onnx': _load_wav2vec2_onnx,
+    'text_classifier': _load_distilroberta,
+    'text_onnx': _load_distilroberta_onnx,
+    'yamnet_model': _load_yamnet,
+    'yamnet_classes': _load_yamnet,
+    'embedder': _load_embedder,
+}
+
+
+def _ensure_model(name: str):
+    global _models_initialized
+    _init_model_dict()
+    if name in _models and _models.get(name) not in (None, []):
+        return
+    loader = _MODEL_LOADERS.get(name)
+    if loader is None:
+        return
+    with _loading_lock:
+        # Load only if still missing
+        if _models.get(name) in (None, []):
+            loader()
+    # Mark initialized when at least one model has been loaded
+    _models_initialized = True
+
+
+def _load_models():
+    """Load all models with thread safety (eager full init)."""
+    _init_model_dict()
+    for key in ['vosk_model', 'audio_feature_extractor', 'wav2vec_model', 'text_classifier', 'yamnet_model', 'yamnet_classes', 'embedder']:
+        _ensure_model(key)
+    print("[INIT] All models initialized.\n")
     return _models
 
 def get_models():
@@ -195,31 +262,15 @@ def get_models():
     return _load_models()
 
 def get_model(name):
-    """Get a specific model by name."""
-    models = get_models()
-    return models.get(name)
+    """Get a specific model by name; lazily load only what's requested."""
+    _ensure_model(name)
+    return _models.get(name)
 
 def is_loaded():
     """Check if models are already loaded."""
     return _models_initialized
 
-# Initialize module-level variables for backward compatibility
-def _ensure_compatibility():
-    """Ensure backward compatibility with direct imports."""
-    global vosk_model, audio_feature_extractor, wav2vec_model, text_classifier
-    global yamnet_model, yamnet_classes, embedder
-    
-    if not _models_initialized:
-        models = get_models()
-        vosk_model = models['vosk_model']
-        audio_feature_extractor = models['audio_feature_extractor']
-        wav2vec_model = models['wav2vec_model']
-        text_classifier = models['text_classifier']
-        yamnet_model = models['yamnet_model']
-        yamnet_classes = models['yamnet_classes']
-        embedder = models['embedder']
-
-# Initialize compatibility variables
+# Initialize compatibility variables (lazy)
 vosk_model = None
 audio_feature_extractor = None
 wav2vec_model = None
@@ -228,6 +279,15 @@ yamnet_model = None
 yamnet_classes = []
 embedder = None
 
-# Load models only if this is the first import
-if not _models_initialized:
-    _ensure_compatibility()
+def _ensure_compatibility_lazy():
+    global vosk_model, audio_feature_extractor, wav2vec_model, text_classifier
+    global yamnet_model, yamnet_classes, embedder
+    if vosk_model is None or audio_feature_extractor is None or wav2vec_model is None or text_classifier is None or yamnet_model is None or not yamnet_classes or embedder is None:
+        m = get_models()
+        vosk_model = m['vosk_model']
+        audio_feature_extractor = m['audio_feature_extractor']
+        wav2vec_model = m['wav2vec_model']
+        text_classifier = m['text_classifier']
+        yamnet_model = m['yamnet_model']
+        yamnet_classes = m['yamnet_classes']
+        embedder = m['embedder']

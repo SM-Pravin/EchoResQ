@@ -9,6 +9,8 @@ import torch
 import numpy as np
 from pathlib import Path
 import traceback
+from modules import env_config as cfg
+from modules.model_loader import get_model
 
 def export_wav2vec_to_onnx(model, feature_extractor, output_path, sample_rate=16000, sequence_length=32000):
     """
@@ -213,28 +215,29 @@ def optimize_models_for_production():
     
     # Import models
     try:
-        from modules.model_loader import wav2vec_model, audio_feature_extractor, text_classifier
-        
-        models_dir = Path("models/optimized")
+        # Resolve output directory from env config
+        models_dir = Path(cfg.get_onnx_model_dir("models/optimized"))
         models_dir.mkdir(exist_ok=True)
         
         success_count = 0
         total_count = 0
         
         # Optimize Wav2Vec2 model
-        if wav2vec_model is not None and audio_feature_extractor is not None:
+        w2v = get_model('wav2vec_model')
+        afe = get_model('audio_feature_extractor')
+        if w2v is not None and afe is not None:
             total_count += 1
             print("🔄 Optimizing Wav2Vec2 model...")
             
             # ONNX export
             onnx_path = models_dir / "wav2vec2_emotion.onnx"
-            if export_wav2vec_to_onnx(wav2vec_model, audio_feature_extractor, str(onnx_path)):
+            if export_wav2vec_to_onnx(w2v, afe, str(onnx_path)):
                 success_count += 1
             
             # Quantization
             try:
                 dummy_audio = torch.randn(1, 32000)
-                dummy_inputs = audio_feature_extractor(
+                dummy_inputs = afe(
                     dummy_audio.numpy(), 
                     sampling_rate=16000, 
                     return_tensors="pt", 
@@ -242,23 +245,24 @@ def optimize_models_for_production():
                 )
                 
                 quantized_path = models_dir / "wav2vec2_emotion_quantized.pth"
-                quantize_model(wav2vec_model, tuple(dummy_inputs.values()), str(quantized_path))
+                quantize_model(w2v, tuple(dummy_inputs.values()), str(quantized_path))
                 
                 # TorchScript
                 torchscript_path = models_dir / "wav2vec2_emotion_torchscript.pt"
-                create_torchscript_model(wav2vec_model, tuple(dummy_inputs.values()), str(torchscript_path))
+                create_torchscript_model(w2v, tuple(dummy_inputs.values()), str(torchscript_path))
                 
             except Exception as e:
                 print(f"⚠️ Additional Wav2Vec2 optimizations failed: {e}")
         
         # Optimize DistilRoBERTa model (from text classifier pipeline)
-        if text_classifier is not None:
+        text_pipe = get_model('text_classifier')
+        if text_pipe is not None:
             total_count += 1
             print("🔄 Optimizing DistilRoBERTa model...")
             
             try:
-                model = text_classifier.model
-                tokenizer = text_classifier.tokenizer
+                model = text_pipe.model
+                tokenizer = text_pipe.tokenizer
                 
                 # ONNX export
                 onnx_path = models_dir / "distilroberta_emotion.onnx"
@@ -310,13 +314,18 @@ This directory contains optimized versions of the emergency AI models:
 
 Usage:
 ------
-Set environment variable USE_OPTIMIZED_MODELS=true to enable optimized models.
-Set MODEL_OPTIMIZATION_TYPE=onnx|quantized|torchscript to choose optimization type.
+To enable ONNX fast-paths at runtime, set environment variables:
+    USE_ONNX=true                 # master switch
+    USE_ONNX_AUDIO=true           # enable Wav2Vec2 ONNX
+    USE_ONNX_TEXT=true            # enable DistilRoBERTa ONNX
+    ONNX_MODEL_DIR={models_dir}
+Optionally, for GPU acceleration (if available):
+    USE_ONNX_CUDA=true
 
-Performance gains:
-- ONNX: 2-3x faster inference
-- Quantized: 30-50% smaller size, 1.5-2x faster
-- TorchScript: 1.5-2x faster, better deployment
+Performance notes (typical CPU):
+- ONNX: 1.5-3x faster inference
+- Quantized: 30-50% smaller size, up to ~2x faster
+- TorchScript: ~1.5-2x faster
 """)
         
         return success_count > 0

@@ -1,7 +1,7 @@
 # modules/sound_event_detector.py
 import numpy as np
 import librosa
-from modules.model_loader import yamnet_model, yamnet_classes
+from modules.model_loader import yamnet_model, yamnet_classes, get_model, get_models
 
 CRITICAL_SOUNDS = {
     "siren": "peak emergency distress",
@@ -18,8 +18,9 @@ def analyze_sound_events(audio_input, threshold=0.3):
     Accepts either a filename (str) or ndarray or dict {'data':ndarray,'sr':int}
     Returns list of tuples: (sound_label, score, mapped_distress)
     """
-    if yamnet_model is None or not yamnet_classes:
-        # YAMNet not available
+    ym = yamnet_model or get_model('yamnet_model')
+    yc = yamnet_classes or get_model('yamnet_classes')
+    if ym is None or not yc:
         return []
 
     try:
@@ -40,7 +41,7 @@ def analyze_sound_events(audio_input, threshold=0.3):
             sr = 16000
 
         # run yamnet model
-        scores, embeddings, spectrogram = yamnet_model(waveform)
+        scores, embeddings, spectrogram = ym(waveform)
         # scores: (frames, classes)
         scores = scores.numpy()
         mean_scores = np.mean(scores, axis=0)
@@ -48,7 +49,7 @@ def analyze_sound_events(audio_input, threshold=0.3):
 
         detected = []
         for idx in top_idxs:
-            sound_label = yamnet_classes[idx].lower()
+            sound_label = yc[idx].lower()
             score = float(mean_scores[idx])
             if sound_label in CRITICAL_SOUNDS and score > threshold:
                 detected.append((sound_label, score, CRITICAL_SOUNDS[sound_label]))

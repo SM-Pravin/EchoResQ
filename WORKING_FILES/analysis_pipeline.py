@@ -41,7 +41,13 @@ from modules.fusion_engine import fuse_emotions
 from modules.distress_mapper import get_distress_token
 from modules.keyword_detector import check_keywords, severity_level
 from modules.sound_event_detector import analyze_sound_events
-from modules.logger import log_call
+from modules.logger import log_call, log_error
+from modules.model_loader import get_model
+from modules.env_config import (
+    get_enable_batch_processing,
+    get_audio_batch_size,
+    get_parallel_max_workers,
+)
 
 # Parameters (kept from original)
 CHUNK_SIZE_SECONDS = 30
@@ -49,20 +55,17 @@ HOP_SIZE_SECONDS = 15
 SILENCE_RMS_THRESHOLD_RATIO = 0.06
 TEMP_DIR = "tmp_chunks"
 
-# Batch processing parameters
-ENABLE_BATCH_PROCESSING = os.environ.get("ENABLE_BATCH_PROCESSING", "true").lower() == "true"
-AUDIO_BATCH_SIZE = int(os.environ.get("AUDIO_BATCH_SIZE", "8"))
+"""Batch processing parameters (resolved via env_config at import time)."""
+ENABLE_BATCH_PROCESSING = get_enable_batch_processing(True)
+AUDIO_BATCH_SIZE = get_audio_batch_size(8)
 
 # Environment-controlled parallelism:
 # Set PARALLEL_MAX_WORKERS env var to control worker count; defaults to os.cpu_count()
 def _get_max_workers():
     try:
-        v = os.environ.get("PARALLEL_MAX_WORKERS")
-        if v:
-            return max(1, int(v))
+        return get_parallel_max_workers(os.cpu_count() or 1)
     except Exception:
-        pass
-    return max(1, (os.cpu_count() or 1))
+        return max(1, (os.cpu_count() or 1))
 
 
 def remove_temp_files(prefix="chunk_"):
@@ -72,10 +75,10 @@ def remove_temp_files(prefix="chunk_"):
         for f in files:
             try:
                 os.remove(f)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as _e:
+                log_error("analysis_pipeline: warning suppress setup", _e)
+    except Exception as _e:
+        log_error("remove_temp_files", _e)
 
 
 def _safe_divide(a, b):
@@ -107,6 +110,17 @@ def _init_worker_models():
         from modules.fusion_engine import fuse_emotions
         from modules.sound_event_detector import analyze_sound_events
         from modules.distress_mapper import get_distress_token
+        # Warm heavy models once per worker (lazy loader ensures no double work)
+        try:
+            _ = get_model('audio_feature_extractor')
+            _ = get_model('wav2vec_model')
+        except Exception as _e:
+            pass
+        try:
+            _ = get_model('yamnet_model')
+            _ = get_model('yamnet_classes')
+        except Exception as _e:
+            pass
         
         _worker_models = {
             'analyze_audio_emotion': analyze_audio_emotion,
@@ -489,8 +503,8 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
         if fixed_file and os.path.exists(fixed_file):
             try:
                 os.remove(fixed_file)
-            except Exception:
-                pass
+            except Exception as _e:
+                log_error("remove_temp_files.glob", _e)
         remove_temp_files()
 
 
@@ -535,8 +549,8 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
             if chunk_callback:
                 try:
                     chunk_callback(chunk_result)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    log_error("_get_max_workers fallback", _e)
             final_results.update({
                 "emotion": emo, "confidence": conf, "distress": distress,
                 "fused_scores": fused, "chunks": [chunk_result]
