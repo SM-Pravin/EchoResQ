@@ -28,14 +28,20 @@ from analysis_pipeline import process_audio_file, process_audio_file_stream
 
 @dataclass
 class PerformanceMetrics:
-    """Container for performance metrics."""
+    """Container for performance metrics with latency targeting."""
     operation: str
     duration_ms: float
     memory_peak_mb: float
     memory_delta_mb: float
     cpu_percent: float
     timestamp: str
+    target_latency_ms: float = 300.0  # Default target
+    meets_target: bool = None
     additional_info: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        if self.meets_target is None:
+            self.meets_target = self.duration_ms <= self.target_latency_ms
 
 class MemoryMonitor:
     """Monitor memory usage during operations."""
@@ -81,8 +87,8 @@ class MemoryMonitor:
         }
 
 @contextmanager
-def profile_operation(operation_name: str, additional_info: Dict = None):
-    """Context manager for profiling operations."""
+def profile_operation(operation_name: str, additional_info: Dict = None, target_latency_ms: float = 300.0):
+    """Context manager for profiling operations with latency targeting."""
     # Initial measurements
     process = psutil.Process(os.getpid())
     start_time = time.perf_counter()
@@ -106,7 +112,7 @@ def profile_operation(operation_name: str, additional_info: Dict = None):
         final_cpu = process.cpu_percent()
         avg_cpu = (start_cpu + final_cpu) / 2
         
-        # Create metrics
+        # Create metrics with target tracking
         metrics = PerformanceMetrics(
             operation=operation_name,
             duration_ms=duration_ms,
@@ -114,6 +120,7 @@ def profile_operation(operation_name: str, additional_info: Dict = None):
             memory_delta_mb=memory_info['delta_mb'],
             cpu_percent=avg_cpu,
             timestamp=datetime.now().isoformat(),
+            target_latency_ms=target_latency_ms,
             additional_info=additional_info or {}
         )
         
@@ -122,7 +129,10 @@ def profile_operation(operation_name: str, additional_info: Dict = None):
             profile_operation.metrics = []
         profile_operation.metrics.append(metrics)
         
-        print(f"📊 {operation_name}: {duration_ms:.1f}ms, {memory_info['delta_mb']:.1f}MB delta, {avg_cpu:.1f}% CPU")
+        # Enhanced logging with target status
+        status = "✅" if metrics.meets_target else "❌"
+        print(f"📊 {status} {operation_name}: {duration_ms:.1f}ms (target: {target_latency_ms}ms), " +
+              f"{memory_info['delta_mb']:.1f}MB delta, {avg_cpu:.1f}% CPU")
 
 def create_test_audio(duration_s=30, sample_rate=16000, freq=440, output_path=None):
     """Create test audio file for benchmarking."""
@@ -374,14 +384,57 @@ def benchmark_memory_usage():
     return results
 
 def generate_performance_report():
-    """Generate comprehensive performance report."""
-    print("📋 Generating performance report...")
+    """Generate comprehensive performance report with latency analysis."""
+    print("📋 Generating enhanced performance report...")
     
     # Get all collected metrics
     metrics = getattr(profile_operation, 'metrics', [])
     if not metrics:
         print("❌ No performance metrics collected")
         return None
+    
+    # Target analysis
+    target_met_count = sum(1 for m in metrics if m.meets_target)
+    target_missed_count = len(metrics) - target_met_count
+    
+    # Latency breakdown by operation type
+    operation_groups = {}
+    for metric in metrics:
+        op_name = metric.operation
+        if op_name not in operation_groups:
+            operation_groups[op_name] = []
+        operation_groups[op_name].append(metric)
+    
+    # Analyze each operation group
+    operation_analysis = {}
+    for op_name, op_metrics in operation_groups.items():
+        durations = [m.duration_ms for m in op_metrics]
+        operation_analysis[op_name] = {
+            'call_count': len(op_metrics),
+            'total_duration_ms': sum(durations),
+            'avg_duration_ms': sum(durations) / len(durations),
+            'min_duration_ms': min(durations),
+            'max_duration_ms': max(durations),
+            'median_duration_ms': sorted(durations)[len(durations)//2],
+            'target_met_count': sum(1 for m in op_metrics if m.meets_target),
+            'target_miss_count': sum(1 for m in op_metrics if not m.meets_target),
+            'target_success_rate': sum(1 for m in op_metrics if m.meets_target) / len(op_metrics) * 100,
+            'avg_memory_delta_mb': sum(m.memory_delta_mb for m in op_metrics) / len(op_metrics),
+            'avg_cpu_percent': sum(m.cpu_percent for m in op_metrics) / len(op_metrics)
+        }
+    
+    # Find bottlenecks
+    bottlenecks = []
+    for op_name, analysis in operation_analysis.items():
+        if analysis['target_success_rate'] < 80:  # Less than 80% success rate
+            bottlenecks.append({
+                'operation': op_name,
+                'avg_duration_ms': analysis['avg_duration_ms'],
+                'success_rate': analysis['target_success_rate'],
+                'worst_case_ms': analysis['max_duration_ms']
+            })
+    
+    bottlenecks.sort(key=lambda x: x['avg_duration_ms'], reverse=True)
     
     # Analyze metrics
     report = {
@@ -391,13 +444,42 @@ def generate_performance_report():
             'avg_duration_ms': sum(m.duration_ms for m in metrics) / len(metrics),
             'peak_memory_mb': max(m.memory_peak_mb for m in metrics),
             'total_memory_delta_mb': sum(m.memory_delta_mb for m in metrics),
-            'avg_cpu_percent': sum(m.cpu_percent for m in metrics) / len(metrics)
+            'avg_cpu_percent': sum(m.cpu_percent for m in metrics) / len(metrics),
+            'target_met_count': target_met_count,
+            'target_missed_count': target_missed_count,
+            'overall_success_rate': (target_met_count / len(metrics)) * 100
         },
-        'operations': {},
-        'slowest_operations': [],
-        'memory_intensive_operations': [],
+        'operations': operation_analysis,
+        'bottlenecks': bottlenecks,
+        'slowest_operations': sorted(metrics, key=lambda m: m.duration_ms, reverse=True)[:10],
+        'memory_intensive_operations': sorted(metrics, key=lambda m: m.memory_delta_mb, reverse=True)[:10],
         'timestamp': datetime.now().isoformat()
     }
+    
+    # Print summary
+    print(f"\n{'='*60}")
+    print("PERFORMANCE ANALYSIS SUMMARY")
+    print(f"{'='*60}")
+    print(f"Total Operations: {report['summary']['total_operations']}")
+    print(f"Average Duration: {report['summary']['avg_duration_ms']:.1f}ms")
+    print(f"Target Success Rate: {report['summary']['overall_success_rate']:.1f}%")
+    print(f"Operations Meeting Target: {target_met_count}/{len(metrics)}")
+    
+    if bottlenecks:
+        print(f"\n🚨 PERFORMANCE BOTTLENECKS ({len(bottlenecks)}):")
+        for bottleneck in bottlenecks[:5]:
+            print(f"  • {bottleneck['operation']}: {bottleneck['avg_duration_ms']:.1f}ms avg, " +
+                  f"{bottleneck['success_rate']:.1f}% success rate")
+    
+    print(f"\n📊 OPERATION BREAKDOWN:")
+    for op_name, analysis in operation_analysis.items():
+        status = "✅" if analysis['target_success_rate'] >= 80 else "❌"
+        print(f"  {status} {op_name}: {analysis['avg_duration_ms']:.1f}ms avg " +
+              f"({analysis['target_success_rate']:.1f}% success, {analysis['call_count']} calls)")
+    
+    print(f"{'='*60}\n")
+    
+    return report
     
     # Group by operation type
     op_groups = {}

@@ -55,6 +55,7 @@ if uploaded is not None and (auto_run or run_button):
         tmp.write(uploaded.getvalue())
         path = tmp.name
     start = time.perf_counter()
+    result = None  # Initialize result variable
     if not process_audio_file:
         st.error("Pipeline not available.")
     else:
@@ -125,7 +126,7 @@ if uploaded is not None and (auto_run or run_button):
                         'distress': c.get('win_distress','-')
                     })
                 import pandas as pd  # local import to keep top lean
-                st.dataframe(pd.DataFrame(compact), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(compact), width='stretch', hide_index=True)
 
             # Raw JSON utilities
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
