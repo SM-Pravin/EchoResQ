@@ -46,6 +46,15 @@ from modules.keyword_detector import check_keywords, severity_level
 from modules.sound_event_detector import analyze_sound_events
 from modules.logger import log_call
 
+# --- Import centralized environment config ---
+from modules.env_config import (
+    PARALLEL_MAX_WORKERS,
+    ENABLE_BATCH_PROCESSING,
+    AUDIO_BATCH_SIZE,
+    MODEL_PATH,
+)
+# --------------------------------------------
+
 # Parameters
 CHUNK_SIZE_SECONDS = 30     # larger chunk to keep sentence context
 HOP_SIZE_SECONDS = 15       # 50% overlap
@@ -289,4 +298,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

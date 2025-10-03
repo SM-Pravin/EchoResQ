@@ -4,7 +4,7 @@ import numpy as np
 import soundfile as sf
 import librosa
 from vosk import KaldiRecognizer
-from modules.model_loader import vosk_model
+from modules.model_loader import vosk_model, get_model
 from modules.keyword_detector import EMERGENCY_KEYWORDS
 
 TARGET_SR = 16000
@@ -23,8 +23,8 @@ def transcribe_audio(audio_path, sample_rate=TARGET_SR):
      - converts to int16 PCM before feeding KaldiRecognizer
      - returns a single concatenated transcript string
     """
-    if vosk_model is None:
-        # model_loader already prints availability; be quiet here
+    vm = vosk_model or get_model('vosk_model')
+    if vm is None:
         return ""
 
     try:
@@ -47,7 +47,7 @@ def transcribe_audio(audio_path, sample_rate=TARGET_SR):
         # convert to PCM16
         pcm16 = (audio * 32767.0).astype('<i2')  # little-endian int16
 
-        rec = KaldiRecognizer(vosk_model, sample_rate)
+        rec = KaldiRecognizer(vm, sample_rate)
         rec.SetWords(True)
 
         transcript_parts = []
@@ -95,7 +95,8 @@ def transcribe_audio_streaming(audio_path, partial_callback=None, keyword_callba
             - partial_results: list of partial results
             - keywords_detected: list of (keyword, timestamp) tuples
     """
-    if vosk_model is None:
+    vm = vosk_model or get_model('vosk_model')
+    if vm is None:
         return {"final_transcript": "", "partial_results": [], "keywords_detected": []}
 
     results = {
@@ -122,7 +123,7 @@ def transcribe_audio_streaming(audio_path, partial_callback=None, keyword_callba
         # Convert to PCM16
         pcm16 = (audio * 32767.0).astype('<i2')
         
-        rec = KaldiRecognizer(vosk_model, sample_rate)
+        rec = KaldiRecognizer(vm, sample_rate)
         rec.SetWords(True)
 
         transcript_parts = []
