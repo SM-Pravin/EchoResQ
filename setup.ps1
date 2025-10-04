@@ -12,11 +12,11 @@ param(
 
 # Colors for output
 $Global:Colors = @{
-    Red = "Red"
-    Green = "Green" 
+    Red    = "Red"
+    Green  = "Green" 
     Yellow = "Yellow"
-    Blue = "Blue"
-    White = "White"
+    Blue   = "Blue"
+    White  = "White"
 }
 
 # Logging functions
@@ -90,8 +90,8 @@ function Test-SystemRequirements {
     
     $requirements = @{
         "Python 3.8+" = { python --version 2>$null | Select-String "Python 3\.[8-9]|Python 3\.1[0-9]" }
-        "pip" = { pip --version 2>$null }
-        "git" = { git --version 2>$null }
+        "pip"         = { pip --version 2>$null }
+        "git"         = { git --version 2>$null }
     }
     
     $missing = @()
@@ -126,7 +126,8 @@ function Install-EmergencyAI {
     Write-Log "Creating virtual environment..."
     if (Test-Path "venv") {
         Write-Warning-Log "Virtual environment already exists"
-    } else {
+    }
+    else {
         python -m venv venv
     }
     
@@ -134,7 +135,8 @@ function Install-EmergencyAI {
     Write-Log "Activating virtual environment..."
     if (Test-Path "venv\Scripts\Activate.ps1") {
         & "venv\Scripts\Activate.ps1"
-    } else {
+    }
+    else {
         Write-Error-Log "Failed to activate virtual environment"
         return
     }
@@ -146,8 +148,9 @@ function Install-EmergencyAI {
     # Install dependencies
     Write-Log "Installing dependencies..."
     if (Test-Path "pyproject.toml") {
-        pip install -e .[dev,testing] 
-    } else {
+        pip install -e .[dev, testing] 
+    }
+    else {
         Write-Error-Log "pyproject.toml not found"
         return
     }
@@ -224,7 +227,8 @@ function Start-Development {
         Write-Log "Using Docker for development environment..."
         if ($Profile) {
             docker-compose -f docker-compose.dev.yml --profile $Profile up -d
-        } else {
+        }
+        else {
             docker-compose -f docker-compose.dev.yml up -d
         }
         
@@ -233,7 +237,8 @@ function Start-Development {
         if ($Profile -eq "jupyter") {
             Write-Host "Jupyter Lab: http://localhost:8888 (token: emergency123)" -ForegroundColor Green
         }
-    } else {
+    }
+    else {
         Write-Log "Docker not found, starting local development..."
         Start-Application
     }
@@ -252,7 +257,8 @@ function Invoke-Tests {
     $testArgs = @("WORKING_FILES\tests\")
     if ($Verbose) {
         $testArgs += "-v"
-    } else {
+    }
+    else {
         $testArgs += "-q"
     }
     
@@ -260,7 +266,8 @@ function Invoke-Tests {
     
     if ($LASTEXITCODE -eq 0) {
         Write-Success "All tests passed"
-    } else {
+    }
+    else {
         Write-Error-Log "Some tests failed"
     }
 }
@@ -338,7 +345,7 @@ function Update-Dependencies {
     python -m pip install --upgrade pip
     
     # Update all packages
-    pip install --upgrade -e .[dev,testing]
+    pip install --upgrade -e .[dev, testing]
     
     Write-Success "Dependencies updated"
 }
@@ -369,13 +376,15 @@ function Invoke-SystemDoctor {
         Write-Host "Models directory: ✓ Found" -ForegroundColor Green
         $modelCount = (Get-ChildItem "WORKING_FILES\models" -Recurse).Count
         Write-Host "Model files: $modelCount files"
-    } else {
+    }
+    else {
         Write-Host "Models directory: ✗ Not found" -ForegroundColor Red
     }
     
     if (Test-Path "venv") {
         Write-Host "Virtual environment: ✓ Found" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "Virtual environment: ✗ Not found" -ForegroundColor Red
     }
     
@@ -383,7 +392,8 @@ function Invoke-SystemDoctor {
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         Write-Host "Docker: ✓ Available" -ForegroundColor Green
         docker --version
-    } else {
+    }
+    else {
         Write-Host "Docker: ✗ Not available" -ForegroundColor Yellow
     }
     
