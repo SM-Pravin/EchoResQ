@@ -1,3 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emergency-ai"
+version = "1.0.0"
+description = "AI-powered emergency audio analysis system"
+authors = [
+    {name = "Emergency AI Team", email = "emergency-ai@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit>=1.28.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "librosa>=0.10.0",
+    "soundfile>=0.12.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    "scikit-learn>=1.3.0",
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "tensorflow>=2.13.0",
+    "vosk>=0.3.42",
+    "webrtcvad>=2.0.10",
+    "psutil>=5.9.0",
+    "pyyaml>=6.0",
+    "tomli>=2.0.0; python_version<'3.11'",
+    "audioread>=3.0.0",
+    "pyaudio>=0.2.11",
+    "plotly>=5.15.0",
+    "streamlit-webrtc>=0.47.0",
+    "av>=10.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.5.0",
+    "ruff>=0.0.280"
+]
+onnx = [
+    "onnx>=1.14.0",
+    "onnxruntime>=1.15.0",
+    "onnxruntime-gpu>=1.15.0"
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

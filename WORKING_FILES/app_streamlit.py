@@ -1,15 +1,44 @@
 import streamlit as st
 import tempfile
 import os
+import sys
 import time
 import pandas as pd
 import numpy as np
 import json
 from modules.env_config import get_config_snapshot
 from modules.logger import log_error
+from modules.config_manager import get_config_manager
 
-# Configure Streamlit page
-st.set_page_config(page_title="Emergency AI", page_icon="🚨", layout="wide")
+# Parse CLI arguments before Streamlit starts (similar to app_minimal.py)
+config_manager = get_config_manager()
+
+if "--" in sys.argv:
+    dash_index = sys.argv.index("--")
+    streamlit_args = sys.argv[dash_index + 1:]
+    
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--config', type=str, help='Configuration file path')
+    parser.add_argument('--sensitivity', choices=['low', 'medium', 'high'], help='Detection sensitivity')
+    parser.add_argument('--live-audio', action='store_true', help='Enable live audio')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    
+    try:
+        parsed_args, _ = parser.parse_known_args(streamlit_args)
+        config_manager.apply_cli_overrides(parsed_args)
+    except:
+        pass
+
+# Get configuration
+config = config_manager.config
+
+# Configure Streamlit page using config values
+st.set_page_config(
+    page_title=config.ui.streamlit.get('page_title', 'Emergency AI'),
+    page_icon=config.ui.streamlit.get('page_icon', '🚨'),
+    layout=config.ui.streamlit.get('layout', 'wide')
+)
 
 # Environment optimization for performance
 os.environ.setdefault("PARALLEL_MAX_WORKERS", "4")
@@ -233,6 +262,74 @@ def format_performance_info(processing_time, chunk_count, mode):
 # Title and description
 st.title("🚨 Emergency AI")
 st.caption("Real-time distress & emotion analysis for emergency audio calls")
+
+# Live Audio Streaming Section
+if config.streaming.enable_live_audio:
+    st.header("🎤 Live Audio Stream")
+    
+    # Streaming controls
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        streaming_mode = st.selectbox(
+            "Streaming Mode",
+            ["Real-time Microphone", "Mock Audio Simulation"],
+            help="Choose between real microphone input or simulated audio for testing"
+        )
+    
+    with col2:
+        sensitivity = st.selectbox(
+            "Detection Sensitivity",
+            ["low", "medium", "high"],
+            index=1,  # Default to medium
+            help="Adjusts distress detection thresholds"
+        )
+    
+    with col3:
+        if st.button("🔧 Update Config"):
+            config_manager.set('fusion.sensitivity', sensitivity)
+            st.success("Config updated!")
+    
+    # Initialize streaming
+    if streaming_mode == "Real-time Microphone":
+        from modules.streaming_audio import create_streamlit_audio_interface
+        stream_processor = create_streamlit_audio_interface(config)
+    else:
+        from modules.streaming_audio import create_mock_audio_interface
+        stream_processor = create_mock_audio_interface(config)
+    
+    # Display streaming results
+    if stream_processor:
+        st.subheader("📊 Live Analysis Results")
+        
+        # Create placeholder for results
+        results_placeholder = st.empty()
+        
+        # Auto-refresh results
+        if st.session_state.get('streaming_active', False):
+            from modules.streaming_audio import display_streaming_results
+            if display_streaming_results(stream_processor, results_placeholder):
+                # Refresh every 500ms when active
+                time.sleep(0.5)
+                st.rerun()
+        
+        # Control buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("▶️ Start Streaming"):
+                st.session_state.streaming_active = True
+                st.rerun()
+        
+        with col2:
+            if st.button("⏹️ Stop Streaming"):
+                st.session_state.streaming_active = False
+                if stream_processor:
+                    stream_processor.stop_processing()
+    
+    st.divider()
+
+# File Upload Section
+st.header("📁 File Upload Analysis")
 
 # Performance Settings in Sidebar
 with st.sidebar:

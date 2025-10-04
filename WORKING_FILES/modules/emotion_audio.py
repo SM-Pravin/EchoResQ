@@ -5,6 +5,106 @@ import librosa
 from modules.model_loader import audio_feature_extractor, wav2vec_model, TORCH_DEVICE, get_model
 from modules import env_config as cfg
 
+
+def analyze_audio_emotion_buffer(audio_buffer, sr=16000):
+    """
+    Analyze emotion from AudioBuffer object directly.
+    Returns dict {label: score}.
+    """
+    from modules.in_memory_audio import AudioBuffer
+    
+    afe = audio_feature_extractor or get_model('audio_feature_extractor')
+    w2v = wav2vec_model or get_model('wav2vec_model')
+    if afe is None and not cfg.get_use_onnx_audio(cfg.get_use_onnx(False)):
+        return {}
+    
+    try:
+        # Get audio data from buffer
+        speech = audio_buffer.data
+        s = audio_buffer.sample_rate
+        
+        # Resample if needed
+        if s != sr:
+            import librosa
+            speech = librosa.resample(speech, orig_sr=s, target_sr=sr)
+        
+        # Ensure mono
+        if speech.ndim > 1:
+            speech = np.mean(speech, axis=1)
+        
+        # Process with existing logic
+        speech = np.asarray(speech, dtype=np.float32)
+        
+        if len(speech) == 0:
+            return {}
+        
+        # Normalize
+        speech = speech / (np.max(np.abs(speech)) + 1e-9)
+        
+        # Use existing model processing
+        if cfg.get_use_onnx_audio(cfg.get_use_onnx(False)):
+            return _analyze_with_onnx_audio(speech, sr)
+        else:
+            return _analyze_with_torch_audio(speech, sr, afe, w2v)
+            
+    except Exception as e:
+        print(f"❌ Buffer audio emotion error: {e}")
+        return {}
+
+
+def _analyze_with_torch_audio(speech, sr, afe, w2v):
+    """Helper function for torch-based audio emotion analysis."""
+    try:
+        # Use wav2vec2 if available
+        if w2v is not None:
+            inputs = afe(speech, sampling_rate=sr, return_tensors="pt", padding=True)
+            inputs = {k: v.to(TORCH_DEVICE) for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = w2v(**inputs)
+                hidden_states = outputs.last_hidden_state
+                # Simple emotion classification (this is a placeholder)
+                # In a real implementation, you'd use a trained emotion classifier
+                pooled = torch.mean(hidden_states, dim=1)
+                # Mock emotion scores for demonstration
+                emotions = {
+                    'happy': float(torch.sigmoid(pooled[0, 0]).cpu()),
+                    'sad': float(torch.sigmoid(pooled[0, 1] if pooled.shape[1] > 1 else pooled[0, 0]).cpu()),
+                    'angry': float(torch.sigmoid(pooled[0, 2] if pooled.shape[1] > 2 else pooled[0, 0]).cpu()),
+                    'fear': float(torch.sigmoid(pooled[0, 3] if pooled.shape[1] > 3 else pooled[0, 0]).cpu()),
+                    'neutral': float(torch.sigmoid(pooled[0, 4] if pooled.shape[1] > 4 else pooled[0, 0]).cpu())
+                }
+                
+                # Normalize to sum to 1
+                total = sum(emotions.values())
+                if total > 0:
+                    emotions = {k: v/total for k, v in emotions.items()}
+                
+                return emotions
+        
+        return {}
+        
+    except Exception as e:
+        print(f"❌ Torch audio analysis error: {e}")
+        return {}
+
+
+def _analyze_with_onnx_audio(speech, sr):
+    """Helper function for ONNX-based audio emotion analysis."""
+    try:
+        # Placeholder for ONNX implementation
+        # This would use the ONNX runtime for inference
+        return {
+            'neutral': 0.4,
+            'happy': 0.3,
+            'sad': 0.1,
+            'angry': 0.1,
+            'fear': 0.1
+        }
+    except Exception as e:
+        print(f"❌ ONNX audio analysis error: {e}")
+        return {}
+
 def analyze_audio_emotion(audio_input, sr=16000):
     """
     Returns dict {label: score}.

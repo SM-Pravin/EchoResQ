@@ -1,15 +1,43 @@
 import streamlit as st
 import os
+import sys
 import time
 import json
 import tempfile
 from modules.logger import log_error
+from modules.config_manager import get_config_manager
 
-# Minimal placeholder UI: upload -> analyze -> show raw structured results succinctly.
-# Assumes analysis_pipeline.process_audio_file exists and returns dict with keys like:
-#   distress, emotion, confidence, transcript, chunks, fused_scores, reason
+# Parse CLI arguments before Streamlit starts
+config_manager = get_config_manager()
 
-st.set_page_config(page_title="Emergency AI (Minimal)", page_icon="🚨", layout="wide")
+# Check for CLI arguments passed after -- in streamlit run command
+if "--" in sys.argv:
+    dash_index = sys.argv.index("--")
+    streamlit_args = sys.argv[dash_index + 1:]
+    
+    # Create a temporary parser for streamlit-specific overrides
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--config', type=str, help='Configuration file path')
+    parser.add_argument('--sensitivity', choices=['low', 'medium', 'high'], help='Detection sensitivity')
+    parser.add_argument('--live-audio', action='store_true', help='Enable live audio (future use)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    
+    try:
+        parsed_args, _ = parser.parse_known_args(streamlit_args)
+        config_manager.apply_cli_overrides(parsed_args)
+    except:
+        pass  # Ignore parsing errors for Streamlit
+
+# Get configuration
+config = config_manager.config
+
+# Set page config using values from configuration
+st.set_page_config(
+    page_title=config.ui.streamlit.get('page_title', 'Emergency AI (Minimal)'),
+    page_icon=config.ui.streamlit.get('page_icon', '🚨'),
+    layout=config.ui.streamlit.get('layout', 'wide')
+)
 
 @st.cache_resource
 def load_pipeline():

@@ -1,0 +1,182 @@
+# Emergency AI Configuration
+# This file contains all configurable parameters for the Emergency AI system
+
+# Processing Configuration
+processing:
+  parallel_max_workers: 4
+  enable_batch_processing: false
+  audio_batch_size: 8
+  chunk_duration: 30.0
+  overlap_duration: 15.0
+  memory_target_mb: 512
+
+# Model Configuration
+models:
+  model_path: "models/default_model.pt"
+  use_onnx: false
+  use_onnx_audio: false
+  use_onnx_text: false
+  onnx_model_dir: "models/optimized"
+  use_onnx_cuda: "auto"  # "true"|"false"|"auto"
+  
+  # Model-specific paths
+  vosk_model_path: "models/vosk-model-medium-en-us"
+  yamnet_model_path: "models/yamnet"
+  wav2vec2_model_path: "models/wav2vec2"
+  distilroberta_model_path: "models/distilroberta"
+
+# Audio Configuration
+audio:
+  sample_rate: 16000
+  vad_aggressiveness: 2
+  silence_threshold: 0.01
+  normalize_audio: true
+  remove_silence: true
+  max_audio_length: 600.0  # 10 minutes
+
+# Fusion Engine Configuration
+fusion:
+  enable_advanced_fusion: true
+  distress_threshold: 0.5
+  confidence_threshold: 0.3
+  emotion_weight: 0.4
+  keyword_weight: 0.3
+  sound_event_weight: 0.3
+  
+  # Sensitivity levels: low, medium, high
+  sensitivity: "medium"
+  sensitivity_adjustments:
+    low:
+      distress_threshold: 0.7
+      confidence_threshold: 0.5
+    medium:
+      distress_threshold: 0.5
+      confidence_threshold: 0.3
+    high:
+      distress_threshold: 0.3
+      confidence_threshold: 0.2
+
+# Keyword Detection
+keywords:
+  enable_keyword_detection: true
+  emergency_keywords:
+    - "help"
+    - "emergency"
+    - "fire"
+    - "accident"
+    - "hurt"
+    - "injured"
+    - "danger"
+    - "attack"
+    - "threat"
+    - "scared"
+    - "violence"
+    - "robbery"
+    - "assault"
+  
+  medical_keywords:
+    - "ambulance"
+    - "hospital"
+    - "doctor"
+    - "medical"
+    - "pain"
+    - "bleeding"
+    - "unconscious"
+    - "breathing"
+    - "heart"
+    - "stroke"
+    - "overdose"
+  
+  keyword_boost_factor: 1.5
+
+# Streaming Configuration
+streaming:
+  enable_live_audio: true
+  chunk_size_ms: 1000
+  buffer_size_ms: 5000
+  min_chunk_duration: 3.0
+  max_chunk_duration: 30.0
+  real_time_processing: true
+  show_partial_results: true
+  
+  # Microphone settings
+  microphone:
+    device_index: null  # null for default
+    channels: 1
+    sample_rate: 16000
+    frames_per_buffer: 1024
+
+# UI Configuration
+ui:
+  streamlit:
+    page_title: "Emergency AI - Audio Analysis"
+    page_icon: "🚨"
+    layout: "wide"
+    sidebar_state: "expanded"
+    
+    # Real-time display settings
+    update_interval_ms: 500
+    max_display_chunks: 10
+    show_confidence_bars: true
+    show_waveform: true
+    
+  results_display:
+    show_raw_scores: false
+    show_debug_info: false
+    highlight_high_distress: true
+    color_code_emotions: true
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/system.log"
+  max_file_size_mb: 50
+  backup_count: 3
+  console_output: true
+  
+  # Performance logging
+  performance_logging: true
+  detailed_timing: false
+  memory_tracking: true
+
+# Performance Configuration  
+performance:
+  enable_gpu: true
+  gpu_device_id: 0
+  memory_limit_mb: 2048
+  cache_models: true
+  preload_models: true
+  
+  # Optimization flags
+  use_mixed_precision: false
+  optimize_for_latency: true
+  batch_inference: true
+  model_quantization: false
+
+# Development Configuration
+development:
+  debug_mode: false
+  profile_performance: false
+  save_intermediate_results: false
+  enable_test_data: false
+  mock_models: false
+  
+  # Testing overrides
+  test_audio_path: "WORKING_FILES/audio_samples"
+  generate_synthetic_data: false
+
+# Security Configuration
+security:
+  sanitize_inputs: true
+  max_file_size_mb: 100
+  allowed_file_types:
+    - ".wav"
+    - ".mp3"
+    - ".flac"
+    - ".m4a"
+    - ".ogg"
+  
+  # API security (for future use)
+  api_key_required: false
+  rate_limiting: false
+  max_requests_per_minute: 60

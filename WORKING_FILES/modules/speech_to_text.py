@@ -14,6 +14,62 @@ FRAME_SECONDS = 0.5  # feed Vosk 0.5s frames
 STREAMING_BUFFER_SIZE = int(TARGET_SR * 2.0)  # 2 second buffer for streaming
 PARTIAL_EMIT_THRESHOLD = 0.3  # seconds of audio before emitting partial results
 
+
+def transcribe_audio_buffer(audio_buffer, sample_rate=TARGET_SR):
+    """
+    Transcribe AudioBuffer object directly without file I/O.
+    """
+    from modules.in_memory_audio import AudioBuffer
+    
+    vm = vosk_model or get_model('vosk_model')
+    if vm is None:
+        return ""
+    
+    try:
+        # Get audio data from buffer
+        audio_data = audio_buffer.data
+        buffer_sr = audio_buffer.sample_rate
+        
+        # Resample if needed
+        if buffer_sr != TARGET_SR:
+            import librosa
+            audio_data = librosa.resample(audio_data, orig_sr=buffer_sr, target_sr=TARGET_SR)
+        
+        # Ensure mono
+        if audio_data.ndim > 1:
+            audio_data = np.mean(audio_data, axis=1)
+        
+        # Convert to int16 PCM for Vosk
+        audio_data = np.clip(audio_data, -1.0, 1.0)
+        pcm_data = (audio_data * 32767).astype(np.int16).tobytes()
+        
+        # Create recognizer
+        rec = KaldiRecognizer(vm, TARGET_SR)
+        rec.SetWords(True)
+        
+        # Process audio
+        results = []
+        chunk_size = int(TARGET_SR * FRAME_SECONDS) * 2  # 2 bytes per sample
+        
+        for i in range(0, len(pcm_data), chunk_size):
+            chunk = pcm_data[i:i + chunk_size]
+            
+            if rec.AcceptWaveform(chunk):
+                result = json.loads(rec.Result())
+                if result.get("text", "").strip():
+                    results.append(result["text"].strip())
+        
+        # Get final result
+        final_result = json.loads(rec.FinalResult())
+        if final_result.get("text", "").strip():
+            results.append(final_result["text"].strip())
+        
+        return " ".join(results).strip()
+        
+    except Exception as e:
+        print(f"❌ Buffer transcription error: {e}")
+        return ""
+
 def transcribe_audio(audio_path, sample_rate=TARGET_SR):
     """
     Robust Vosk transcription:
