@@ -1,4 +1,4 @@
-"""
+﻿"""
 Test script to validate Phase 1 optimizations for Emergency AI pipeline.
 Tests async processing, smart batch processing, performance monitoring, and in-memory operations.
 """
@@ -69,7 +69,7 @@ def create_test_audio_files():
 
 def test_device_management():
     """Test device management optimization."""
-    print("\n🔧 Testing Device Management...")
+    print("\n[CONFIG] Testing Device Management...")
     
     device_manager = get_device_manager()
     device_info = device_manager.device_info
@@ -168,7 +168,7 @@ def test_in_memory_processing(test_files):
 
 def test_performance_monitoring():
     """Test real-time performance monitoring."""
-    print("\n📊 Testing Performance Monitoring...")
+    print("\n[DASHBOARD] Testing Performance Monitoring...")
     
     # Set up monitoring
     monitor = setup_pipeline_monitoring()
@@ -287,7 +287,7 @@ def cleanup_test_files(test_files):
 
 async def run_comprehensive_test():
     """Run comprehensive test of all Phase 1 optimizations."""
-    print("🚀 EMERGENCY AI PHASE 1 OPTIMIZATION VALIDATION")
+    print("[ROCKET] EMERGENCY AI PHASE 1 OPTIMIZATION VALIDATION")
     print("=" * 60)
     
     test_results = {}
@@ -310,14 +310,14 @@ async def run_comprehensive_test():
         
         # Summary
         print("\n" + "=" * 60)
-        print("📊 TEST RESULTS SUMMARY")
+        print("[DASHBOARD] TEST RESULTS SUMMARY")
         print("=" * 60)
         
         passed_tests = 0
         total_tests = len(test_results)
         
         for test_name, result in test_results.items():
-            status = "✅ PASS" if result else "❌ FAIL"
+            status = "[OK] PASS" if result else "[ERROR] FAIL"
             print(f"  {status} {test_name.replace('_', ' ').title()}")
             if result:
                 passed_tests += 1
@@ -325,16 +325,16 @@ async def run_comprehensive_test():
         print(f"\nOverall: {passed_tests}/{total_tests} tests passed")
         
         if passed_tests == total_tests:
-            print("🎉 ALL PHASE 1 OPTIMIZATIONS VALIDATED SUCCESSFULLY!")
+            print("[SUCCESS] ALL PHASE 1 OPTIMIZATIONS VALIDATED SUCCESSFULLY!")
         elif passed_tests >= total_tests * 0.8:
-            print("⚠️ Most optimizations working - some issues to investigate")
+            print("[WARNING] Most optimizations working - some issues to investigate")
         else:
-            print("❌ Significant issues detected - optimization review needed")
+            print("[ERROR] Significant issues detected - optimization review needed")
         
         # Show performance dashboard
         if test_results.get('performance_monitoring'):
             print("\n" + "=" * 60)
-            print("📈 PERFORMANCE DASHBOARD")
+            print("[CHART] PERFORMANCE DASHBOARD")
             print("=" * 60)
             dashboard = get_performance_dashboard()
             print(dashboard)
@@ -342,7 +342,7 @@ async def run_comprehensive_test():
         return passed_tests >= total_tests * 0.8
         
     except Exception as e:
-        print(f"❌ Test execution failed: {e}")
+        print(f"[ERROR] Test execution failed: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -359,14 +359,14 @@ def main():
         result = asyncio.run(run_comprehensive_test())
         
         if result:
-            print("\n✅ Phase 1 optimization validation completed successfully!")
+            print("\n[OK] Phase 1 optimization validation completed successfully!")
             return 0
         else:
-            print("\n❌ Phase 1 optimization validation failed!")
+            print("\n[ERROR] Phase 1 optimization validation failed!")
             return 1
             
     except Exception as e:
-        print(f"❌ Critical error during testing: {e}")
+        print(f"[ERROR] Critical error during testing: {e}")
         import traceback
         traceback.print_exc()
         return 1

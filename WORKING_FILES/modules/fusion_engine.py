@@ -1,4 +1,4 @@
-# modules/fusion_engine.py
+﻿# modules/fusion_engine.py
 """
 Enhanced fusion engine for Emergency AI with configurable distress scoring.
 Combines keyword detection, emotion analysis, and sound events for comprehensive distress assessment.
@@ -234,7 +234,7 @@ def get_distress_analysis(audio_scores: dict = None,
                 all_keywords = config.keywords.emergency_keywords + config.keywords.medical_keywords
                 keywords_detected = [kw for kw in all_keywords if kw.lower() in transcript.lower()]
         except Exception as e:
-            print(f"⚠️ Keyword detection error: {e}")
+            print(f"[WARNING] Keyword detection error: {e}")
             keywords_detected = []
     
     # Enhanced emotion fusion with distress scoring

@@ -1,0 +1,83 @@
+# Emergency AI - Development Docker Compose
+# Optimized for development with hot reloading and debugging
+
+version: '3.8'
+
+services:
+  # Development Emergency AI Application
+  emergency-ai-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: emergency-ai-dev
+    ports:
+      - "8501:8501"  # Streamlit UI
+      - "8000:8000"  # API
+      - "5678:5678"  # Debugger port
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_RUN_ON_SAVE=true
+      - DEVELOPMENT_MODE=true
+      - LOG_LEVEL=DEBUG
+      - PYTHONPATH=/app
+    volumes:
+      # Mount source code for hot reloading
+      - ./WORKING_FILES:/app/WORKING_FILES:rw
+      - ./config.yaml:/app/config.yaml:rw
+      - ./logs:/app/logs:rw
+      - ./uploads:/app/uploads:rw
+      - dev_models:/app/models
+    networks:
+      - emergency-dev-net
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Redis for development caching
+  redis-dev:
+    image: redis:7-alpine
+    container_name: emergency-ai-redis-dev
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+    command: redis-server --appendonly no --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - emergency-dev-net
+    restart: unless-stopped
+
+  # Jupyter Lab for development and experimentation
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: emergency-ai-jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=emergency123
+    volumes:
+      - ./:/app:rw
+      - jupyter_data:/root/.jupyter
+    command: jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=emergency123
+    networks:
+      - emergency-dev-net
+    restart: unless-stopped
+    profiles:
+      - jupyter
+
+volumes:
+  dev_models:
+    driver: local
+  jupyter_data:
+    driver: local
+
+networks:
+  emergency-dev-net:
+    driver: bridge

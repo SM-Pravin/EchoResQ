@@ -1,4 +1,4 @@
-# modules/speech_to_text.py
+﻿# modules/speech_to_text.py
 import json
 import numpy as np
 import soundfile as sf
@@ -67,7 +67,7 @@ def transcribe_audio_buffer(audio_buffer, sample_rate=TARGET_SR):
         return " ".join(results).strip()
         
     except Exception as e:
-        print(f"❌ Buffer transcription error: {e}")
+        print(f"[ERROR] Buffer transcription error: {e}")
         return ""
 
 def transcribe_audio(audio_path, sample_rate=TARGET_SR):
@@ -131,7 +131,7 @@ def transcribe_audio(audio_path, sample_rate=TARGET_SR):
 
     except Exception as e:
         # Don't crash main; upstream handles empty transcript
-        print(f" ⚠️ Error in Vosk transcription: {e}")
+        print(f" [WARNING] Error in Vosk transcription: {e}")
         return ""
 
 
@@ -288,7 +288,7 @@ def transcribe_audio_streaming(audio_path, partial_callback=None, keyword_callba
         return results
 
     except Exception as e:
-        print(f" ⚠️ Error in streaming transcription: {e}")
+        print(f" [WARNING] Error in streaming transcription: {e}")
         return results
 
 

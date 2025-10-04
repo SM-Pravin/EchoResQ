@@ -1,4 +1,4 @@
-# modules/emotion_audio.py
+﻿# modules/emotion_audio.py
 import torch
 import numpy as np
 import librosa
@@ -48,7 +48,7 @@ def analyze_audio_emotion_buffer(audio_buffer, sr=16000):
             return _analyze_with_torch_audio(speech, sr, afe, w2v)
             
     except Exception as e:
-        print(f"❌ Buffer audio emotion error: {e}")
+        print(f"[ERROR] Buffer audio emotion error: {e}")
         return {}
 
 
@@ -85,7 +85,7 @@ def _analyze_with_torch_audio(speech, sr, afe, w2v):
         return {}
         
     except Exception as e:
-        print(f"❌ Torch audio analysis error: {e}")
+        print(f"[ERROR] Torch audio analysis error: {e}")
         return {}
 
 
@@ -102,7 +102,7 @@ def _analyze_with_onnx_audio(speech, sr):
             'fear': 0.1
         }
     except Exception as e:
-        print(f"❌ ONNX audio analysis error: {e}")
+        print(f"[ERROR] ONNX audio analysis error: {e}")
         return {}
 
 def analyze_audio_emotion(audio_input, sr=16000):
@@ -192,7 +192,7 @@ def analyze_audio_emotion(audio_input, sr=16000):
         labels = w2v.config.id2label
         return {labels[int(i)].lower(): float(probs[int(i)]) for i in range(len(probs))}
     except Exception as e:
-        print(f" ⚠️ Failed audio emotion analysis: {e}")
+        print(f" [WARNING] Failed audio emotion analysis: {e}")
         return {}
 
 
@@ -314,7 +314,7 @@ def analyze_audio_emotion_batch(audio_inputs, sr=16000, max_batch_size=8):
                     batch_results.append(result)
                 
             except Exception as e:
-                print(f" ⚠️ Failed batch audio emotion analysis: {e}")
+                print(f" [WARNING] Failed batch audio emotion analysis: {e}")
                 # Fallback to individual processing for this batch
                 for audio_input in batch:
                     batch_results.append(analyze_audio_emotion(audio_input, sr=sr))
@@ -322,7 +322,7 @@ def analyze_audio_emotion_batch(audio_inputs, sr=16000, max_batch_size=8):
             results.extend(batch_results)
             
     except Exception as e:
-        print(f" ⚠️ Critical error in batch processing: {e}")
+        print(f" [WARNING] Critical error in batch processing: {e}")
         # Complete fallback
         results = [analyze_audio_emotion(audio_input, sr=sr) for audio_input in audio_inputs]
     

@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import os
 import sys
 import time
@@ -35,7 +35,7 @@ config = config_manager.config
 # Set page config using values from configuration
 st.set_page_config(
     page_title=config.ui.streamlit.get('page_title', 'Emergency AI (Minimal)'),
-    page_icon=config.ui.streamlit.get('page_icon', '🚨'),
+    page_icon=config.ui.streamlit.get('page_icon', '[EMERGENCY]'),
     layout=config.ui.streamlit.get('layout', 'wide')
 )
 
@@ -67,7 +67,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🚨 Emergency AI – Minimal UI")
+st.title("[EMERGENCY] Emergency AI – Minimal UI")
 st.caption("Lightweight placeholder interface. Upload audio, run analysis, view structured results.")
 
 col_u, col_opts = st.columns([3,1])

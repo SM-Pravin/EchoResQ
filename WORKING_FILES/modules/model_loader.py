@@ -1,4 +1,4 @@
-# modules/model_loader.py
+﻿# modules/model_loader.py
 """
 Optimized model loader that prevents duplicate loading in Streamlit and other scenarios.
 Thread-safe singleton pattern ensures models are loaded only once.
@@ -213,7 +213,7 @@ class DeviceManager:
                 torch.cuda.empty_cache()
                 print("🧹 GPU memory cache cleared")
             except Exception as e:
-                print(f"⚠️ Failed to clear GPU cache: {e}")
+                print(f"[WARNING] Failed to clear GPU cache: {e}")
     
     def get_device_summary(self) -> str:
         """Get human-readable device summary."""
@@ -255,7 +255,7 @@ USE_GPU = TORCH_DEVICE.type == "cuda"
 PIPELINE_DEVICE = 0 if USE_GPU else -1
 
 # Print device information
-print("🔧 Device Configuration:")
+print("[CONFIG] Device Configuration:")
 print(device_manager.get_device_summary())
 
 # Model paths - adjusted for actual structure
@@ -319,26 +319,26 @@ def _load_wav2vec2():
                     except Exception:
                         pass  # Not all models support this
                 
-                print(f" ✅ Wav2Vec2 model loaded (device: {TORCH_DEVICE})")
+                print(f" [OK] Wav2Vec2 model loaded (device: {TORCH_DEVICE})")
                 memory_usage = device_manager.get_memory_usage()
                 if memory_usage['gpu_memory_mb'] > 0:
                     print(f"    GPU memory: {memory_usage['gpu_memory_mb']}MB")
                     
             except Exception as e:
-                print(f" ⚠️ Failed to load Wav2Vec2 from {WAV2VEC2_PATH}: {e}")
+                print(f" [WARNING] Failed to load Wav2Vec2 from {WAV2VEC2_PATH}: {e}")
                 # Try CPU fallback
                 if TORCH_DEVICE.type != 'cpu':
                     try:
                         _models['wav2vec_model'] = Wav2Vec2ForSequenceClassification.from_pretrained(
                             WAV2VEC2_PATH, local_files_only=True
                         ).to('cpu').eval()
-                        print(f" ✅ Wav2Vec2 model loaded on CPU (fallback)")
+                        print(f" [OK] Wav2Vec2 model loaded on CPU (fallback)")
                     except Exception as fallback_e:
-                        print(f" ❌ CPU fallback also failed: {fallback_e}")
+                        print(f" [ERROR] CPU fallback also failed: {fallback_e}")
         else:
-            print(f" ⚠️ Wav2Vec2 model folder not found at: {WAV2VEC2_PATH}")
+            print(f" [WARNING] Wav2Vec2 model folder not found at: {WAV2VEC2_PATH}")
     except Exception as e:
-        print(f" ⚠️ Transformers not available or error loading wav2vec2: {e}")
+        print(f" [WARNING] Transformers not available or error loading wav2vec2: {e}")
 
 
 def _load_wav2vec2_onnx():
@@ -368,11 +368,11 @@ def _load_wav2vec2_onnx():
                 sess_options=sess_options,
                 providers=providers
             )
-            print(f" ✅ ONNX Wav2Vec2 loaded (providers: {_models['wav2vec_onnx'].get_providers()})")
+            print(f" [OK] ONNX Wav2Vec2 loaded (providers: {_models['wav2vec_onnx'].get_providers()})")
         else:
-            print(f" ⚠️ ONNX Wav2Vec2 model not found at {onnx_path}")
+            print(f" [WARNING] ONNX Wav2Vec2 model not found at {onnx_path}")
     except Exception as e:
-        print(f" ⚠️ Failed to load ONNX Wav2Vec2: {e}")
+        print(f" [WARNING] Failed to load ONNX Wav2Vec2: {e}")
 
 
 def _load_distilroberta():
@@ -397,13 +397,13 @@ def _load_distilroberta():
                     max_length=512
                 )
                 
-                print(f" ✅ DistilRoBERTa loaded (device: {TORCH_DEVICE})")
+                print(f" [OK] DistilRoBERTa loaded (device: {TORCH_DEVICE})")
                 memory_usage = device_manager.get_memory_usage()
                 if memory_usage['gpu_memory_mb'] > 0:
                     print(f"    GPU memory: {memory_usage['gpu_memory_mb']}MB")
                     
             except Exception as e:
-                print(f" ⚠️ Failed to load DistilRoBERTa from {DISTILROBERTA_PATH}: {e}")
+                print(f" [WARNING] Failed to load DistilRoBERTa from {DISTILROBERTA_PATH}: {e}")
                 # Try CPU fallback
                 if TORCH_DEVICE.type != 'cpu':
                     try:
@@ -413,13 +413,13 @@ def _load_distilroberta():
                         _models['text_classifier'] = pipeline(
                             "text-classification", model=model, tokenizer=tok, device=-1
                         )
-                        print(f" ✅ DistilRoBERTa loaded on CPU (fallback)")
+                        print(f" [OK] DistilRoBERTa loaded on CPU (fallback)")
                     except Exception as fallback_e:
-                        print(f" ❌ CPU fallback also failed: {fallback_e}")
+                        print(f" [ERROR] CPU fallback also failed: {fallback_e}")
         else:
-            print(f" ⚠️ DistilRoBERTa model folder not found at: {DISTILROBERTA_PATH}")
+            print(f" [WARNING] DistilRoBERTa model folder not found at: {DISTILROBERTA_PATH}")
     except Exception as e:
-        print(f" ⚠️ Transformers not available or error loading DistilRoBERTa: {e}")
+        print(f" [WARNING] Transformers not available or error loading DistilRoBERTa: {e}")
 
 
 def _load_distilroberta_onnx():
@@ -449,11 +449,11 @@ def _load_distilroberta_onnx():
                 sess_options=sess_options, 
                 providers=providers
             )
-            print(f" ✅ ONNX DistilRoBERTa loaded (providers: {_models['text_onnx'].get_providers()})")
+            print(f" [OK] ONNX DistilRoBERTa loaded (providers: {_models['text_onnx'].get_providers()})")
         else:
-            print(f" ⚠️ ONNX DistilRoBERTa model not found at {onnx_path}")
+            print(f" [WARNING] ONNX DistilRoBERTa model not found at {onnx_path}")
     except Exception as e:
-        print(f" ⚠️ Failed to load ONNX DistilRoBERTa: {e}")
+        print(f" [WARNING] Failed to load ONNX DistilRoBERTa: {e}")
 
 
 def _load_yamnet():
@@ -532,7 +532,7 @@ def _load_models():
     """Load all models with thread safety (eager full init)."""
     _init_model_dict()
     
-    print("🚀 Initializing models with enhanced device management...")
+    print("[ROCKET] Initializing models with enhanced device management...")
     
     # Load core models
     for key in ['vosk_model', 'audio_feature_extractor', 'wav2vec_model', 'text_classifier', 'yamnet_model', 'yamnet_classes', 'embedder']:
@@ -545,7 +545,7 @@ def _load_models():
     if cfg.get_use_onnx_text(cfg.get_use_onnx(False)):
         _ensure_model('text_onnx')
     
-    print("✅ All models initialized.")
+    print("[OK] All models initialized.")
     print_device_summary()
     
     return _models

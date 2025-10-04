@@ -129,15 +129,29 @@ ui:
 # Logging Configuration
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  file: "logs/system.log"
+  file: "logs/emergency_ai.log"
   max_file_size_mb: 50
   backup_count: 3
   console_output: true
   
   # Performance logging
   performance_logging: true
-  detailed_timing: false
+  detailed_timing: true
   memory_tracking: true
+  
+  # Structured logging
+  json_format: true
+  include_caller_info: true
+  include_process_info: true
+  
+  # Module-specific logging levels
+  module_levels:
+    speech_to_text: "DEBUG"
+    emotion_audio: "DEBUG"
+    emotion_text: "INFO"
+    fusion_engine: "DEBUG"
+    streaming_audio: "INFO"
+    memory_management: "WARNING"
 
 # Performance Configuration  
 performance:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Real-time audio streaming and processing module for Emergency AI.
 Supports live microphone input with partial transcription and emotion analysis.
 """
@@ -17,7 +17,7 @@ try:
     PYAUDIO_AVAILABLE = True
 except ImportError:
     PYAUDIO_AVAILABLE = False
-    print("⚠️ PyAudio not available. Install with: pip install pyaudio")
+    print("[WARNING] PyAudio not available. Install with: pip install pyaudio")
 
 try:
     from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
@@ -25,7 +25,7 @@ try:
     WEBRTC_AVAILABLE = True
 except ImportError:
     WEBRTC_AVAILABLE = False
-    print("⚠️ streamlit-webrtc not available. Install with: pip install streamlit-webrtc")
+    print("[WARNING] streamlit-webrtc not available. Install with: pip install streamlit-webrtc")
 
 from modules.config_manager import get_config_manager
 from modules.in_memory_audio import AudioBuffer, get_audio_processor
@@ -162,7 +162,7 @@ class AudioStreamProcessor:
                         from modules.speech_to_text import transcribe_audio
                         transcript = transcribe_audio(tmp.name)
             except Exception as e:
-                print(f"⚠️ Transcription error: {e}")
+                print(f"[WARNING] Transcription error: {e}")
                 transcript = ""
             
             # Skip if no meaningful transcript
@@ -185,7 +185,7 @@ class AudioStreamProcessor:
                         from modules.emotion_audio import analyze_audio_emotion
                         audio_emotion = analyze_audio_emotion(tmp.name)
             except Exception as e:
-                print(f"⚠️ Audio emotion error: {e}")
+                print(f"[WARNING] Audio emotion error: {e}")
                 audio_emotion = {}
             
             # Text emotion analysis
@@ -193,7 +193,7 @@ class AudioStreamProcessor:
             try:
                 text_emotion = analyze_text_emotion(transcript)
             except Exception as e:
-                print(f"⚠️ Text emotion error: {e}")
+                print(f"[WARNING] Text emotion error: {e}")
                 text_emotion = {}
             
             # Fusion
@@ -206,7 +206,7 @@ class AudioStreamProcessor:
                 keywords_detected = []  # Placeholder - implement keyword extraction
                 distress_token_from_keywords = check_keywords(transcript, "low distress")
             except Exception as e:
-                print(f"⚠️ Keyword detection error: {e}")
+                print(f"[WARNING] Keyword detection error: {e}")
             
             # Distress scoring
             try:
@@ -214,7 +214,7 @@ class AudioStreamProcessor:
                 if distress_token_from_keywords and distress_token_from_keywords != "low distress":
                     distress_token = distress_token_from_keywords
             except Exception as e:
-                print(f"⚠️ Distress mapping error: {e}")
+                print(f"[WARNING] Distress mapping error: {e}")
                 distress_token = "unknown"
             
             # Calculate distress score (0-1)
@@ -302,7 +302,7 @@ class WebRTCAudioProcessor(AudioProcessorBase):
             self.stream_processor.add_audio_chunk(audio_data, frame.sample_rate)
             
         except Exception as e:
-            print(f"⚠️ WebRTC processing error: {e}")
+            print(f"[WARNING] WebRTC processing error: {e}")
         
         return frame
 
@@ -310,7 +310,7 @@ class WebRTCAudioProcessor(AudioProcessorBase):
 def create_streamlit_audio_interface(config=None) -> Optional[AudioStreamProcessor]:
     """Create Streamlit interface for real-time audio processing."""
     if not WEBRTC_AVAILABLE:
-        st.error("⚠️ Real-time audio requires streamlit-webrtc. Install with: pip install streamlit-webrtc")
+        st.error("[WARNING] Real-time audio requires streamlit-webrtc. Install with: pip install streamlit-webrtc")
         return None
     
     config = config or get_config_manager().config
@@ -408,7 +408,7 @@ def create_mock_audio_interface(config=None) -> AudioStreamProcessor:
             stream_processor.results_queue.put(mock_result)
     
     with col3:
-        if st.button("🚨 Simulate Emergency"):
+        if st.button("[EMERGENCY] Simulate Emergency"):
             # Generate mock emergency audio
             mock_audio = np.random.randn(16000 * 4).astype(np.float32) * 0.2  # 4 seconds
             stream_processor.add_audio_chunk(mock_audio)
@@ -458,7 +458,7 @@ def display_streaming_results(stream_processor: AudioStreamProcessor,
                          latest_result.distress_token)
             
             with col3:
-                st.metric("🎯 Confidence", f"{latest_result.confidence:.2f}")
+                st.metric("[TARGET] Confidence", f"{latest_result.confidence:.2f}")
             
             # Transcript
             st.subheader("📝 Live Transcript")
@@ -507,7 +507,7 @@ def display_streaming_results(stream_processor: AudioStreamProcessor,
             
             # Keywords
             if latest_result.keywords_detected:
-                st.subheader("🔍 Keywords Detected")
+                st.subheader("[SEARCH] Keywords Detected")
                 keyword_tags = " ".join([f"`{kw}`" for kw in latest_result.keywords_detected])
                 st.markdown(keyword_tags)
             

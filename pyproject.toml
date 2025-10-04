@@ -5,71 +5,275 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "emergency-ai"
 version = "1.0.0"
-description = "AI-powered emergency audio analysis system"
+description = "Advanced real-time emergency audio analysis system with AI-powered distress detection"
 authors = [
-    {name = "Emergency AI Team", email = "emergency-ai@example.com"}
+    {name = "Emergency AI Team", email = "contact@emergency-ai.com"}
+]
+maintainers = [
+    {name = "Emergency AI Team", email = "contact@emergency-ai.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+keywords = [
+    "emergency", "audio", "ai", "speech-recognition", "emotion-detection", 
+    "distress-analysis", "real-time", "machine-learning", "streamlit"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring"
+]
 dependencies = [
-    "streamlit>=1.28.0",
-    "numpy>=1.24.0",
-    "scipy>=1.10.0",
-    "librosa>=0.10.0",
-    "soundfile>=0.12.0",
-    "pandas>=2.0.0",
-    "matplotlib>=3.7.0",
-    "seaborn>=0.12.0",
-    "scikit-learn>=1.3.0",
-    "transformers>=4.30.0",
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
-    "tensorflow>=2.13.0",
-    "vosk>=0.3.42",
-    "webrtcvad>=2.0.10",
-    "psutil>=5.9.0",
-    "pyyaml>=6.0",
-    "tomli>=2.0.0; python_version<'3.11'",
-    "audioread>=3.0.0",
-    "pyaudio>=0.2.11",
-    "plotly>=5.15.0",
-    "streamlit-webrtc>=0.47.0",
-    "av>=10.0.0"
+    # Core audio processing
+    "numpy>=1.21.0,<2.0.0",
+    "scipy>=1.7.0,<2.0.0", 
+    "librosa>=0.9.0,<1.0.0",
+    "soundfile>=0.10.0,<1.0.0",
+    "pyaudio>=0.2.11; platform_system != 'Linux'",
+    
+    # Machine Learning
+    "tensorflow>=2.8.0,<3.0.0",
+    "tensorflow-hub>=0.12.0",
+    "transformers>=4.20.0,<5.0.0",
+    "torch>=1.12.0,<3.0.0",
+    "torchaudio>=0.12.0",
+    "vosk>=0.3.42,<1.0.0",
+    "scikit-learn>=1.1.0,<2.0.0",
+    
+    # Web interface and visualization
+    "streamlit>=1.25.0,<2.0.0",
+    "streamlit-webrtc>=0.44.0,<1.0.0",
+    "plotly>=5.0.0,<6.0.0",
+    "pandas>=1.3.0,<3.0.0",
+    "matplotlib>=3.5.0,<4.0.0",
+    "seaborn>=0.11.0,<1.0.0",
+    "memory-profiler>=0.60.0,<1.0.0",
+    
+    # Configuration and utilities
+    "pyyaml>=6.0,<7.0",
+    "python-dotenv>=0.19.0,<2.0.0",
+    "click>=8.0.0,<9.0.0",
+    "rich>=13.0.0,<14.0.0",
+    "typer>=0.7.0,<1.0.0",
+    
+    # Logging and monitoring
+    "loguru>=0.7.0,<1.0.0",
+    "psutil>=5.8.0,<6.0.0",
+    "memory-profiler>=0.61.0,<1.0.0",
+    
+    # Network and API
+    "requests>=2.25.0,<3.0.0",
+    "aiohttp>=3.8.0,<4.0.0",
+    "websockets>=10.0,<12.0",
+    
+    # Data validation
+    "pydantic>=1.10.0,<3.0.0",
+    "jsonschema>=4.0.0,<5.0.0"
 ]
 
 [project.optional-dependencies]
+# Development tools
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "isort>=5.12.0",
-    "mypy>=1.5.0",
-    "ruff>=0.0.280"
-]
-onnx = [
-    "onnx>=1.14.0",
-    "onnxruntime>=1.15.0",
-    "onnxruntime-gpu>=1.15.0"
+    "pytest>=7.0.0,<8.0.0",
+    "pytest-cov>=4.0.0,<5.0.0",
+    "pytest-asyncio>=0.21.0,<1.0.0",
+    "pytest-xdist>=3.0.0,<4.0.0",
+    "black>=22.0.0,<24.0.0",
+    "flake8>=5.0.0,<7.0.0",
+    "mypy>=0.991,<2.0.0",
+    "pre-commit>=2.20.0,<4.0.0",
+    "isort>=5.10.0,<6.0.0",
+    "bandit>=1.7.0,<2.0.0"
 ]
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-select = ["E", "F", "I", "UP", "N"]
-ignore = ["E501"]
+# Testing and benchmarking
+testing = [
+    "pytest>=7.0.0,<8.0.0",
+    "pytest-asyncio>=0.21.0,<1.0.0",
+    "pytest-benchmark>=4.0.0,<5.0.0",
+    "pytest-mock>=3.10.0,<4.0.0",
+    "coverage>=7.0.0,<8.0.0",
+    "memory-profiler>=0.61.0,<1.0.0",
+    "line-profiler>=4.0.0,<5.0.0",
+    "py-spy>=0.3.0,<1.0.0"
+]
+
+# Documentation
+docs = [
+    "sphinx>=5.0.0,<8.0.0",
+    "sphinx-rtd-theme>=1.2.0,<2.0.0",
+    "myst-parser>=0.18.0,<3.0.0",
+    "sphinx-autodoc-typehints>=1.19.0,<2.0.0"
+]
+
+# Production deployment
+production = [
+    "gunicorn>=20.1.0,<22.0.0",
+    "uvicorn>=0.18.0,<1.0.0",
+    "redis>=4.3.0,<6.0.0",
+    "celery>=5.2.0,<6.0.0",
+    "docker>=6.0.0,<8.0.0"
+]
+
+# GPU acceleration (optional)
+gpu = [
+    "tensorflow-gpu>=2.8.0,<3.0.0",
+    "torch[cuda]>=1.12.0,<3.0.0",
+    "cupy-cuda11x>=11.0.0; platform_system != 'Darwin'"
+]
+
+# All optional dependencies
+all = [
+    "emergency-ai[dev,testing,docs,production,gpu]"
+]
+
+[project.scripts]
+emergency-ai = "WORKING_FILES.cli:main"
+emergency-gui = "WORKING_FILES.gui:main"
+emergency-validate = "WORKING_FILES.validate:main"
+emergency-analyze = "WORKING_FILES.analysis_pipeline:cli_main"
+emergency-stream = "WORKING_FILES.modules.streaming_audio:cli_main"
+emergency-benchmark = "WORKING_FILES.benchmarks.performance_profiler:main"
+emergency-test = "WORKING_FILES.tests.stress_test_suite:main"
+emergency-serve = "streamlit:run WORKING_FILES/app_streamlit.py"
+
+[project.gui-scripts]
+emergency-ai-gui = "WORKING_FILES.gui:main"
+
+[project.urls]
+Homepage = "https://github.com/SM-Pravin/EchoResQ"
+Documentation = "https://github.com/SM-Pravin/EchoResQ/wiki"
+Repository = "https://github.com/SM-Pravin/EchoResQ.git"
+"Bug Tracker" = "https://github.com/SM-Pravin/EchoResQ/issues"
+"Changelog" = "https://github.com/SM-Pravin/EchoResQ/blob/main/CHANGELOG.md"
+"Funding" = "https://github.com/sponsors/SM-Pravin"
+
+[tool.setuptools]
+packages = {find = {where = ["."], include = ["WORKING_FILES*"]}}
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.package-data]
+"*" = [
+    "*.yaml", "*.yml", "*.json", "*.txt", "*.md",
+    "*.csv", "*.h5", "*.pb", "*.safetensors",
+    "config/*", "models/*", "assets/*",
+    "tests/data/*", "benchmarks/data/*"
+]
+
+[tool.setuptools.exclude-package-data]
+"*" = [
+    "*.pyc", "*.pyo", "*.orig", "*.rej",
+    "__pycache__/*", ".git/*", ".pytest_cache/*",
+    "*.log", "logs/*", "tmp_chunks/*"
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers --strict-config --tb=short"
+testpaths = [
+    "WORKING_FILES/tests"
+]
+python_files = [
+    "test_*.py",
+    "*_test.py", 
+    "tests.py"
+]
+python_functions = [
+    "test_*"
+]
+python_classes = [
+    "Test*",
+    "*Test",
+    "*TestCase"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "stress: marks tests as stress tests",
+    "benchmark: marks tests as benchmark tests",
+    "edge_case: marks tests as edge case tests",
+    "regression: marks tests as regression tests",
+    "gpu: marks tests that require GPU",
+    "audio: marks tests that require audio files"
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning:tensorflow.*",
+    "ignore::UserWarning:librosa.*"
+]
 
 [tool.black]
 line-length = 100
-target-version = ["py310"]
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+(
+  /(
+      \.eggs
+    | \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+    | models
+    | __pycache__
+    | \.pytest_cache
+  )/
+)
+'''
 
 [tool.isort]
 profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+split_on_trailing_comma = true
+known_first_party = ["WORKING_FILES"]
 
-[tool.pytest.ini_options]
-addopts = "-q --maxfail=1"
-testpaths = ["WORKING_FILES/tests"]
+[tool.mypy]  
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict_optional = true
+no_implicit_optional = true
+show_error_codes = true
 
-[tool.mypy]
-python_version = "3.10"
+[[tool.mypy.overrides]]
+module = [
+    "librosa.*",
+    "soundfile.*", 
+    "vosk.*",
+    "tensorflow.*",
+    "transformers.*",
+    "plotly.*",
+    "streamlit.*"
+]
 ignore_missing_imports = true
-strict = false

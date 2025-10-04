@@ -1,4 +1,4 @@
-"""
+﻿"""
 Async-enabled analysis pipeline for Emergency AI.
 Provides true concurrent processing of STT, emotion detection, and sound analysis
 with better resource management and lower latency.
@@ -230,7 +230,7 @@ class AsyncAudioProcessor:
             
         except Exception as e:
             error_msg = f"Async processing error: {e}"
-            print(f"❌ {error_msg}")
+            print(f"[ERROR] {error_msg}")
             traceback.print_exc()
             results["error"] = error_msg
             return results

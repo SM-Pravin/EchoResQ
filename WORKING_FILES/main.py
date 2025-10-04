@@ -1,4 +1,4 @@
-# main.py
+﻿# main.py
 """
 Enhanced main entrypoint for the Emergency AI pipeline with CLI support.
 
@@ -132,7 +132,7 @@ def main():
     
     # Handle missing audio file
     if not args.audio_file:
-        print("❌ Error: Audio file path is required")
+        print("[ERROR] Error: Audio file path is required")
         parser.print_help()
         return
     
@@ -140,12 +140,12 @@ def main():
     fast_mode = args.fast
 
     if not os.path.exists(audio_file):
-        print(f"❌ Error: {audio_file} not found.")
+        print(f"[ERROR] Error: {audio_file} not found.")
         return
     
     # Print configuration if debug mode
     if config.development.get('debug_mode', False):
-        print("🔧 Configuration:")
+        print("[CONFIG] Configuration:")
         config_manager.print_config('processing')
         config_manager.print_config('fusion')
         print()
@@ -174,7 +174,7 @@ def main():
         sound_events_all = []
         reason = "fast mode: skipped chunked audio & sound analysis"
         print("\n" + "=" * 50)
-        print("      🚨 EMERGENCY CALL REPORT (FAST) 🚨")
+        print("      [EMERGENCY] EMERGENCY CALL REPORT (FAST) [EMERGENCY]")
         print("=" * 50)
         print(f" Caller ID     : {caller_id}")
         print(f" Transcript    : {transcript if transcript else '(empty)'}")
@@ -262,7 +262,7 @@ def main():
 
         except Exception as e:
             # be resilient: continue to next chunk
-            print(f" ⚠️ Error processing chunk {chunk_path}: {e}")
+            print(f" [WARNING] Error processing chunk {chunk_path}: {e}")
             continue
 
     # Normalize aggregated audio fused scores
@@ -298,7 +298,7 @@ def main():
 
     # Pretty print final report
     print("\n" + "=" * 50)
-    print("      🚨 EMERGENCY CALL REPORT 🚨")
+    print("      [EMERGENCY] EMERGENCY CALL REPORT [EMERGENCY]")
     print("=" * 50)
     print(f" Caller ID     : {caller_id}")
     print(f" Transcript    : {transcript if transcript else '(empty)'}")

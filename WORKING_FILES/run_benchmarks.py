@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Advanced benchmark runner for Emergency AI performance testing.
 Includes detailed per-module timing, latency breakdown, and regression testing.
@@ -249,14 +249,14 @@ def benchmark_module_performance(test_files: List[str], timer: ModuleTimer) -> D
                 'timestamp': datetime.now().isoformat()
             }
             results['errors'].append(error_info)
-            print(f"    ❌ Error processing {Path(file_path).name}: {e}")
+            print(f"    [ERROR] Error processing {Path(file_path).name}: {e}")
     
     return results
 
 
 def run_regression_tests(baseline_file: Optional[str] = None) -> Dict[str, Any]:
     """Run automated performance regression tests."""
-    print("🔍 Running performance regression tests...")
+    print("[SEARCH] Running performance regression tests...")
     
     # Load baseline if available
     baseline = None
@@ -264,9 +264,9 @@ def run_regression_tests(baseline_file: Optional[str] = None) -> Dict[str, Any]:
         try:
             with open(baseline_file, 'r') as f:
                 baseline = json.load(f)
-            print(f"    📊 Loaded baseline from {baseline_file}")
+            print(f"    [DASHBOARD] Loaded baseline from {baseline_file}")
         except Exception as e:
-            print(f"    ⚠️ Failed to load baseline: {e}")
+            print(f"    [WARNING] Failed to load baseline: {e}")
     
     # Run current benchmarks
     timer = ModuleTimer(target_latency_ms=300.0)
@@ -381,7 +381,7 @@ def print_performance_summary(results: Dict[str, Any]):
     print(f"Total Modules Tested: {summary['total_modules']}")
     print(f"Total Function Calls: {summary['total_calls']}")
     print(f"Average Call Time: {summary['average_call_time_ms']:.1f}ms")
-    print(f"Target Met Overall: {'✅ YES' if summary['target_met_overall'] else '❌ NO'}")
+    print(f"Target Met Overall: {'[OK] YES' if summary['target_met_overall'] else '[ERROR] NO'}")
     
     if summary['bottleneck_count'] > 0:
         print(f"\n🚫 PERFORMANCE BOTTLENECKS ({summary['bottleneck_count']}):")
@@ -389,16 +389,16 @@ def print_performance_summary(results: Dict[str, Any]):
             print(f"  • {bottleneck['module']}: {bottleneck['average_ms']:.1f}ms " +
                   f"({bottleneck['overrun_factor']:.1f}x over target)")
     
-    print(f"\n📊 MODULE PERFORMANCE:")
+    print(f"\n[DASHBOARD] MODULE PERFORMANCE:")
     for module_name, stats in report['modules'].items():
-        status = "✅" if stats['target_met'] else "❌"
+        status = "[OK]" if stats['target_met'] else "[ERROR]"
         print(f"  {status} {module_name}: {stats['average_time_ms']:.1f}ms " +
               f"(calls: {stats['call_count']})")
     
     # Regression analysis
     if 'regression_analysis' in results and results['regression_analysis']:
         reg_analysis = results['regression_analysis']
-        print(f"\n📈 REGRESSION ANALYSIS:")
+        print(f"\n[CHART] REGRESSION ANALYSIS:")
         print(f"  Overall Change: {reg_analysis['overall_change_percent']:.1f}%")
         
         if reg_analysis['regressions']:
@@ -449,7 +449,7 @@ def main():
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
     os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
     
-    print("🚀 Enhanced Emergency AI Performance Benchmarks")
+    print("[ROCKET] Enhanced Emergency AI Performance Benchmarks")
     print("="*60)
     print(f"Benchmark Type: {args.type}")
     print(f"Target Latency: {args.target_latency}ms")
@@ -461,7 +461,7 @@ def main():
     print("="*60)
     
     # Initialize system components
-    print("\n🔧 Initializing system components...")
+    print("\n[CONFIG] Initializing system components...")
     device_manager = get_device_manager()
     memory_manager = get_memory_manager()
     
@@ -493,7 +493,7 @@ def main():
                     pass
         
         elif args.type == "full":
-            print("\n📊 Running comprehensive performance benchmark...")
+            print("\n[DASHBOARD] Running comprehensive performance benchmark...")
             try:
                 from benchmarks.performance_profiler import run_full_benchmark
                 run_full_benchmark()
@@ -547,7 +547,7 @@ def main():
                 print_performance_summary(results)
         
         elif args.type == "regression":
-            print("\n🔍 Running regression analysis...")
+            print("\n[SEARCH] Running regression analysis...")
             results = run_regression_tests(args.baseline)
             print_performance_summary(results)
             
@@ -561,13 +561,13 @@ def main():
         print("\n🧹 Cleaning up...")
         memory_manager.cleanup_all()
         
-        print("\n✅ Benchmarking completed successfully!")
+        print("\n[OK] Benchmarking completed successfully!")
         
     except KeyboardInterrupt:
         print("\n⏹️ Benchmark interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Benchmark failed: {e}")
+        print(f"\n[ERROR] Benchmark failed: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

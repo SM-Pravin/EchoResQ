@@ -1,4 +1,4 @@
-"""
+﻿"""
 Real-time performance monitoring system for Emergency AI pipeline.
 Tracks latency, throughput, memory usage, and automatically adjusts processing parameters
 for optimal performance targeting <300ms per chunk.
@@ -76,7 +76,7 @@ class SystemOptimizationRule:
                 self.last_triggered = time.time()
                 return True
             except Exception as e:
-                print(f"❌ Failed to execute optimization rule '{self.name}': {e}")
+                print(f"[ERROR] Failed to execute optimization rule '{self.name}': {e}")
                 return False
         return False
 
@@ -160,7 +160,7 @@ class RealTimePerformanceMonitor:
             'critical_cpu_percent': 95.0
         }
         
-        print("🔍 Real-time performance monitor initialized")
+        print("[SEARCH] Real-time performance monitor initialized")
     
     def _create_optimization_rules(self) -> List[SystemOptimizationRule]:
         """Create system optimization rules."""
@@ -171,7 +171,7 @@ class RealTimePerformanceMonitor:
             return metrics.get('chunk_processing_latency_ms', 0) > 400
         
         def reduce_latency_action(system_state: Dict[str, Any]):
-            print("🎯 Auto-optimization: Reducing latency by decreasing batch size")
+            print("[TARGET] Auto-optimization: Reducing latency by decreasing batch size")
             batch_processor = get_batch_processor()
             if hasattr(batch_processor, '_current_batch_size'):
                 batch_processor._current_batch_size = max(
@@ -219,7 +219,7 @@ class RealTimePerformanceMonitor:
                     metrics.get('cpu_utilization_percent', 0) < 60)
         
         def increase_throughput_action(system_state: Dict[str, Any]):
-            print("📈 Auto-optimization: Increasing throughput by optimizing batch size")
+            print("[CHART] Auto-optimization: Increasing throughput by optimizing batch size")
             batch_processor = get_batch_processor()
             if hasattr(batch_processor, '_current_batch_size'):
                 current_memory = get_current_memory_usage_mb()
@@ -262,7 +262,7 @@ class RealTimePerformanceMonitor:
         )
         self._optimization_thread.start()
         
-        print("🚀 Real-time performance monitoring started")
+        print("[ROCKET] Real-time performance monitoring started")
     
     def stop_monitoring(self):
         """Stop real-time monitoring."""
@@ -289,7 +289,7 @@ class RealTimePerformanceMonitor:
                 time.sleep(self.monitoring_interval)
                 
             except Exception as e:
-                print(f"❌ Error in monitoring loop: {e}")
+                print(f"[ERROR] Error in monitoring loop: {e}")
                 time.sleep(self.monitoring_interval)
     
     def _optimization_loop(self):
@@ -305,7 +305,7 @@ class RealTimePerformanceMonitor:
                 time.sleep(5.0)  # Check every 5 seconds
                 
             except Exception as e:
-                print(f"❌ Error in optimization loop: {e}")
+                print(f"[ERROR] Error in optimization loop: {e}")
                 time.sleep(5.0)
     
     def _collect_system_metrics(self):
@@ -348,7 +348,7 @@ class RealTimePerformanceMonitor:
                 self._update_metric_stats()
         
         except Exception as e:
-            print(f"❌ Error collecting system metrics: {e}")
+            print(f"[ERROR] Error collecting system metrics: {e}")
     
     def _update_metric_stats(self):
         """Update rolling statistics for metrics."""
@@ -407,7 +407,7 @@ class RealTimePerformanceMonitor:
         }
         
         self._alerts.append(alert)
-        print(f"⚠️ Performance Alert [{severity.upper()}]: {message}")
+        print(f"[WARNING] Performance Alert [{severity.upper()}]: {message}")
     
     def _run_optimization_rules(self):
         """Execute automatic optimization rules."""
@@ -421,10 +421,10 @@ class RealTimePerformanceMonitor:
                 if rule.trigger(current_metrics, self._system_state):
                     triggered_rules.append(rule.name)
             except Exception as e:
-                print(f"❌ Error executing rule '{rule.name}': {e}")
+                print(f"[ERROR] Error executing rule '{rule.name}': {e}")
         
         if triggered_rules:
-            print(f"🎯 Auto-optimization triggered rules: {', '.join(triggered_rules)}")
+            print(f"[TARGET] Auto-optimization triggered rules: {', '.join(triggered_rules)}")
     
     def record_processing_time(self, operation: str, duration_ms: float, metadata: Dict[str, Any] = None):
         """Record processing time for a specific operation."""
@@ -584,11 +584,11 @@ class RealTimePerformanceMonitor:
                 with open(filepath, 'w') as f:
                     json.dump(data, f, indent=2)
             
-            print(f"📊 Metrics exported to {filepath}")
+            print(f"[DASHBOARD] Metrics exported to {filepath}")
             return True
             
         except Exception as e:
-            print(f"❌ Failed to export metrics: {e}")
+            print(f"[ERROR] Failed to export metrics: {e}")
             return False
     
     def reset_metrics(self):
@@ -681,16 +681,16 @@ def get_performance_dashboard() -> str:
     
     dashboard = []
     dashboard.append("=" * 60)
-    dashboard.append("🔍 EMERGENCY AI PERFORMANCE DASHBOARD")
+    dashboard.append("[SEARCH] EMERGENCY AI PERFORMANCE DASHBOARD")
     dashboard.append("=" * 60)
     
     # Current metrics
-    dashboard.append("\n📊 CURRENT METRICS:")
+    dashboard.append("\n[DASHBOARD] CURRENT METRICS:")
     for metric_name, value in summary['current_metrics'].items():
         if metric_name in monitor.targets:
             target = monitor.targets[metric_name]
             compliance = summary['target_compliance'][metric_name]
-            status = "✅" if compliance['is_met'] else "❌"
+            status = "[OK]" if compliance['is_met'] else "[ERROR]"
             deviation = compliance['deviation_percent']
             
             dashboard.append(f"  {status} {target.name}: {value:.1f}{target.unit} "
@@ -699,7 +699,7 @@ def get_performance_dashboard() -> str:
     
     # Recent alerts
     if summary['recent_alerts']:
-        dashboard.append("\n⚠️ RECENT ALERTS:")
+        dashboard.append("\n[WARNING] RECENT ALERTS:")
         for alert in summary['recent_alerts'][-3:]:
             alert_time = datetime.fromtimestamp(alert['timestamp']).strftime("%H:%M:%S")
             dashboard.append(f"  [{alert_time}] {alert['message']}")
@@ -712,10 +712,10 @@ def get_performance_dashboard() -> str:
     
     # Performance trends
     if trends['trends']:
-        dashboard.append("\n📈 TRENDS (Last 10 min):")
+        dashboard.append("\n[CHART] TRENDS (Last 10 min):")
         for metric_name, trend_data in list(trends['trends'].items())[:3]:
             if metric_name.endswith('_ms') or metric_name.endswith('_per_sec'):
-                trend_icon = "📈" if trend_data['trend'] == 'improving' else "📉" if trend_data['trend'] == 'degrading' else "➡️"
+                trend_icon = "[CHART]" if trend_data['trend'] == 'improving' else "📉" if trend_data['trend'] == 'degrading' else "➡️"
                 dashboard.append(f"  {trend_icon} {metric_name}: avg {trend_data['avg']:.1f}, "
                                f"range {trend_data['min']:.1f}-{trend_data['max']:.1f}")
     
@@ -737,5 +737,5 @@ def setup_pipeline_monitoring():
     # Start monitoring
     monitor.start_monitoring()
     
-    print("🎯 Emergency AI pipeline monitoring configured and started")
+    print("[TARGET] Emergency AI pipeline monitoring configured and started")
     return monitor

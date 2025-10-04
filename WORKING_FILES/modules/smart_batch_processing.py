@@ -1,4 +1,4 @@
-"""
+﻿"""
 Smart batch processing system with dynamic sizing based on available memory and CPU cores.
 Includes adaptive chunk sizing for different audio lengths and optimal resource utilization.
 """
@@ -202,7 +202,7 @@ class AdaptiveBatchProcessor:
                         results.extend(batch_results)
         
         except Exception as e:
-            print(f"❌ Batch processing failed: {e}")
+            print(f"[ERROR] Batch processing failed: {e}")
             # Fallback to sequential processing
             results = [processor_func(item) for item in items]
         
@@ -303,7 +303,7 @@ class AdaptiveBatchProcessor:
                 self.config.min_batch_size
             )
         
-        print(f"🎯 Optimized batch size to {self._current_batch_size} "
+        print(f"[TARGET] Optimized batch size to {self._current_batch_size} "
               f"(throughput: {avg_throughput:.1f} items/sec)")
     
     def get_performance_stats(self) -> Dict[str, Any]:
@@ -487,7 +487,7 @@ def optimize_batch_processing_for_system() -> BatchProcessingConfig:
         config.max_batch_size = min(config.max_batch_size * 2, 32)
         config.target_memory_usage_mb *= 1.5
     
-    print(f"🎯 Optimized batch config: batch_size={config.min_batch_size}-{config.max_batch_size}, "
+    print(f"[TARGET] Optimized batch config: batch_size={config.min_batch_size}-{config.max_batch_size}, "
           f"memory_target={config.target_memory_usage_mb:.0f}MB")
     
     return config

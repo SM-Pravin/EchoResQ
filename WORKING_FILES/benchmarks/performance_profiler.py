@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Comprehensive performance profiling and benchmarking suite for Emergency AI.
-Provides detailed timing, memory usage, and bottleneck analysis.
+Enhanced performance profiling and benchmarking suite for Emergency AI.
+Provides detailed timing, memory usage, bottleneck analysis, and regression testing.
 """
 
 import os
@@ -26,6 +26,14 @@ import numpy as np
 import soundfile as sf
 from analysis_pipeline import process_audio_file, process_audio_file_stream
 
+# Try to import memory profiler (optional dependency)
+try:
+    import memory_profiler
+    MEMORY_PROFILER_AVAILABLE = True
+except ImportError:
+    MEMORY_PROFILER_AVAILABLE = False
+    print("Warning: memory_profiler not available. Install with: pip install memory-profiler")
+
 @dataclass
 class PerformanceMetrics:
     """Container for performance metrics with latency targeting."""
@@ -42,6 +50,37 @@ class PerformanceMetrics:
     def __post_init__(self):
         if self.meets_target is None:
             self.meets_target = self.duration_ms <= self.target_latency_ms
+
+
+@dataclass
+class PerformanceBenchmark:
+    """Detailed performance benchmark results."""
+    test_name: str
+    timestamp: str
+    audio_duration_seconds: float
+    processing_time_ms: float
+    processing_speed_ratio: float  # processing_time / audio_duration
+    memory_usage_mb: float
+    peak_memory_mb: float
+    cpu_usage_percent: float
+    confidence_score: float
+    transcript_length: int
+    models_loaded: List[str]
+    bottlenecks: List[str]
+    metadata: Dict[str, Any] = None
+
+
+@dataclass
+class SystemProfile:
+    """System resource profiling information."""
+    cpu_cores: int
+    total_memory_gb: float
+    available_memory_gb: float
+    python_version: str
+    tensorflow_version: Optional[str]
+    torch_version: Optional[str]
+    cuda_available: bool
+    gpu_memory_gb: Optional[float]
 
 class MemoryMonitor:
     """Monitor memory usage during operations."""
@@ -130,8 +169,8 @@ def profile_operation(operation_name: str, additional_info: Dict = None, target_
         profile_operation.metrics.append(metrics)
         
         # Enhanced logging with target status
-        status = "✅" if metrics.meets_target else "❌"
-        print(f"📊 {status} {operation_name}: {duration_ms:.1f}ms (target: {target_latency_ms}ms), " +
+        status = "[OK]" if metrics.meets_target else "[ERROR]"
+        print(f"[DASHBOARD] {status} {operation_name}: {duration_ms:.1f}ms (target: {target_latency_ms}ms), " +
               f"{memory_info['delta_mb']:.1f}MB delta, {avg_cpu:.1f}% CPU")
 
 def create_test_audio(duration_s=30, sample_rate=16000, freq=440, output_path=None):
@@ -149,9 +188,240 @@ def create_test_audio(duration_s=30, sample_rate=16000, freq=440, output_path=No
     sf.write(output_path, audio, sample_rate, subtype='PCM_16')
     return output_path
 
+class EnhancedPerformanceProfiler:
+    """Enhanced performance profiler with comprehensive benchmarking capabilities."""
+    
+    def __init__(self):
+        from modules.enhanced_logger import get_logger
+        from modules.config_manager import get_config_manager
+        
+        self.logger = get_logger()
+        self.config = get_config_manager().config
+        self.system_profile = self._get_system_profile()
+        self.benchmarks: List[PerformanceBenchmark] = []
+    
+    def _get_system_profile(self) -> SystemProfile:
+        """Get system resource information."""
+        import platform
+        
+        # Check for optional dependencies
+        tf_version = None
+        torch_version = None
+        cuda_available = False
+        gpu_memory = None
+        
+        try:
+            import tensorflow as tf
+            tf_version = tf.__version__
+        except ImportError:
+            pass
+        
+        try:
+            import torch
+            torch_version = torch.__version__
+            cuda_available = torch.cuda.is_available()
+            if cuda_available:
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        except ImportError:
+            pass
+        
+        return SystemProfile(
+            cpu_cores=psutil.cpu_count(),
+            total_memory_gb=psutil.virtual_memory().total / (1024**3),
+            available_memory_gb=psutil.virtual_memory().available / (1024**3),
+            python_version=platform.python_version(),
+            tensorflow_version=tf_version,
+            torch_version=torch_version,
+            cuda_available=cuda_available,
+            gpu_memory_gb=gpu_memory
+        )
+    
+    def profile_audio_processing(self, audio_file: str, 
+                               test_name: str = "audio_processing") -> PerformanceBenchmark:
+        """Profile audio processing with detailed metrics."""
+        self.logger.info(f"Profiling {test_name} for file: {audio_file}")
+        
+        # Get audio duration
+        audio_info = sf.info(audio_file)
+        audio_duration = audio_info.duration
+        
+        # Monitor system resources
+        process = psutil.Process()
+        initial_memory = process.memory_info().rss / (1024**2)  # MB
+        
+        # CPU monitoring thread
+        cpu_samples = []
+        monitoring = True
+        
+        def monitor_cpu():
+            while monitoring:
+                try:
+                    cpu_samples.append(psutil.cpu_percent(interval=0.1))
+                except:
+                    break
+        
+        cpu_thread = threading.Thread(target=monitor_cpu)
+        cpu_thread.start()
+        
+        try:
+            # Profile the processing
+            start_time = time.time()
+            
+            with profile_operation("benchmark", test_name):
+                result = process_audio_file(audio_file)
+            
+            processing_time = (time.time() - start_time) * 1000  # ms
+            
+            # Stop monitoring
+            monitoring = False
+            cpu_thread.join()
+            
+            # Get final resource usage
+            final_memory = process.memory_info().rss / (1024**2)  # MB
+            peak_memory = max(initial_memory, final_memory)
+            avg_cpu = sum(cpu_samples) / max(len(cpu_samples), 1) if cpu_samples else 0
+            
+            # Identify potential bottlenecks
+            bottlenecks = self._identify_bottlenecks(
+                processing_time, audio_duration, peak_memory, avg_cpu
+            )
+            
+            benchmark = PerformanceBenchmark(
+                test_name=test_name,
+                timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                audio_duration_seconds=audio_duration,
+                processing_time_ms=processing_time,
+                processing_speed_ratio=processing_time / 1000 / audio_duration,
+                memory_usage_mb=final_memory - initial_memory,
+                peak_memory_mb=peak_memory,
+                cpu_usage_percent=avg_cpu,
+                confidence_score=result.get('confidence', 0.0),
+                transcript_length=len(result.get('transcript', '')),
+                models_loaded=self._get_loaded_models(),
+                bottlenecks=bottlenecks,
+                metadata={
+                    'audio_file': os.path.basename(audio_file),
+                    'sample_rate': audio_info.samplerate,
+                    'channels': audio_info.channels,
+                    'system_profile': asdict(self.system_profile)
+                }
+            )
+            
+            self.benchmarks.append(benchmark)
+            return benchmark
+            
+        except Exception as e:
+            monitoring = False
+            if cpu_thread.is_alive():
+                cpu_thread.join()
+            self.logger.error(f"Profiling failed for {test_name}: {e}")
+            raise
+    
+    def _identify_bottlenecks(self, processing_time_ms: float, audio_duration: float,
+                            memory_mb: float, cpu_percent: float) -> List[str]:
+        """Identify performance bottlenecks based on metrics."""
+        bottlenecks = []
+        
+        # Processing speed bottleneck
+        speed_ratio = processing_time_ms / 1000 / audio_duration
+        if speed_ratio > 2.0:  # Taking more than 2x real-time
+            bottlenecks.append("slow_processing")
+        
+        # Memory bottleneck
+        if memory_mb > 2000:  # More than 2GB
+            bottlenecks.append("high_memory_usage")
+        
+        # CPU bottleneck
+        if cpu_percent > 90:
+            bottlenecks.append("high_cpu_usage")
+        elif cpu_percent < 20:
+            bottlenecks.append("underutilized_cpu")
+        
+        # Model loading bottleneck (if processing is slow but CPU is low)
+        if speed_ratio > 1.5 and cpu_percent < 50:
+            bottlenecks.append("model_loading_overhead")
+        
+        return bottlenecks
+    
+    def _get_loaded_models(self) -> List[str]:
+        """Get list of currently loaded models."""
+        models = []
+        
+        if self.config.get('models', {}).get('speech_to_text', {}).get('enabled', True):
+            models.append('speech_to_text')
+        
+        if self.config.get('models', {}).get('emotion_detection', {}).get('enabled', True):
+            models.append('emotion_detection')
+        
+        if self.config.get('models', {}).get('sound_classification', {}).get('enabled', True):
+            models.append('sound_classification')
+        
+        return models
+    
+    def benchmark_suite(self, test_audio_files: List[str]) -> Dict[str, Any]:
+        """Run comprehensive benchmark suite."""
+        self.logger.info(f"Running benchmark suite on {len(test_audio_files)} files")
+        
+        suite_start = time.time()
+        benchmarks = []
+        
+        for i, audio_file in enumerate(test_audio_files):
+            if not os.path.exists(audio_file):
+                self.logger.warning(f"Skipping missing file: {audio_file}")
+                continue
+            
+            test_name = f"benchmark_{i+1}_{os.path.basename(audio_file)}"
+            
+            try:
+                benchmark = self.profile_audio_processing(audio_file, test_name)
+                benchmarks.append(benchmark)
+            except Exception as e:
+                self.logger.error(f"Benchmark failed for {audio_file}: {e}")
+        
+        suite_duration = time.time() - suite_start
+        
+        # Calculate suite statistics
+        if benchmarks:
+            avg_processing_time = sum(b.processing_time_ms for b in benchmarks) / len(benchmarks)
+            avg_speed_ratio = sum(b.processing_speed_ratio for b in benchmarks) / len(benchmarks)
+            avg_memory = sum(b.memory_usage_mb for b in benchmarks) / len(benchmarks)
+            avg_confidence = sum(b.confidence_score for b in benchmarks) / len(benchmarks)
+            
+            # Find most common bottlenecks
+            all_bottlenecks = [b for benchmark in benchmarks for b in benchmark.bottlenecks]
+            bottleneck_counts = {}
+            for bottleneck in all_bottlenecks:
+                bottleneck_counts[bottleneck] = bottleneck_counts.get(bottleneck, 0) + 1
+            
+            common_bottlenecks = sorted(bottleneck_counts.items(), 
+                                      key=lambda x: x[1], reverse=True)
+        else:
+            avg_processing_time = 0
+            avg_speed_ratio = 0 
+            avg_memory = 0
+            avg_confidence = 0
+            common_bottlenecks = []
+        
+        suite_results = {
+            'suite_duration_seconds': suite_duration,
+            'total_files': len(test_audio_files),
+            'successful_benchmarks': len(benchmarks),
+            'failed_benchmarks': len(test_audio_files) - len(benchmarks),
+            'avg_processing_time_ms': avg_processing_time,
+            'avg_speed_ratio': avg_speed_ratio,
+            'avg_memory_usage_mb': avg_memory,
+            'avg_confidence_score': avg_confidence,
+            'common_bottlenecks': common_bottlenecks,
+            'system_profile': asdict(self.system_profile),
+            'individual_benchmarks': [asdict(b) for b in benchmarks]
+        }
+        
+        return suite_results
+
+
 def benchmark_audio_durations():
     """Benchmark processing times for different audio durations."""
-    print("🎯 Benchmarking different audio durations...")
+    print("[TARGET] Benchmarking different audio durations...")
     
     durations = [10, 30, 60, 120, 300]  # seconds
     results = {}
@@ -180,7 +450,7 @@ def benchmark_audio_durations():
             }
             
         except Exception as e:
-            print(f"❌ Error processing {duration}s audio: {e}")
+            print(f"[ERROR] Error processing {duration}s audio: {e}")
             results[duration] = {'error': str(e)}
         
         finally:
@@ -224,7 +494,7 @@ def benchmark_parallelization():
                 del os.environ["PARALLEL_MAX_WORKERS"]
                 
         except Exception as e:
-            print(f"❌ Error with {workers} workers: {e}")
+            print(f"[ERROR] Error with {workers} workers: {e}")
             results[workers] = {'error': str(e), 'success': False}
     
     # Cleanup
@@ -276,7 +546,7 @@ def benchmark_batch_processing():
             del os.environ["ENABLE_BATCH_PROCESSING"]
             
     except Exception as e:
-        print(f"❌ Error in batch processing benchmark: {e}")
+        print(f"[ERROR] Error in batch processing benchmark: {e}")
         results = {'error': str(e)}
     
     # Cleanup
@@ -339,7 +609,7 @@ def benchmark_streaming_vs_batch():
         }
         
     except Exception as e:
-        print(f"❌ Error in streaming benchmark: {e}")
+        print(f"[ERROR] Error in streaming benchmark: {e}")
         results = {'error': str(e)}
     
     # Cleanup
@@ -372,7 +642,7 @@ def benchmark_memory_usage():
             }
             
         except Exception as e:
-            print(f"❌ Memory test failed for {duration}s: {e}")
+            print(f"[ERROR] Memory test failed for {duration}s: {e}")
             results[duration] = {'error': str(e), 'success': False}
         
         finally:
@@ -390,7 +660,7 @@ def generate_performance_report():
     # Get all collected metrics
     metrics = getattr(profile_operation, 'metrics', [])
     if not metrics:
-        print("❌ No performance metrics collected")
+        print("[ERROR] No performance metrics collected")
         return None
     
     # Target analysis
@@ -466,14 +736,14 @@ def generate_performance_report():
     print(f"Operations Meeting Target: {target_met_count}/{len(metrics)}")
     
     if bottlenecks:
-        print(f"\n🚨 PERFORMANCE BOTTLENECKS ({len(bottlenecks)}):")
+        print(f"\n[EMERGENCY] PERFORMANCE BOTTLENECKS ({len(bottlenecks)}):")
         for bottleneck in bottlenecks[:5]:
             print(f"  • {bottleneck['operation']}: {bottleneck['avg_duration_ms']:.1f}ms avg, " +
                   f"{bottleneck['success_rate']:.1f}% success rate")
     
-    print(f"\n📊 OPERATION BREAKDOWN:")
+    print(f"\n[DASHBOARD] OPERATION BREAKDOWN:")
     for op_name, analysis in operation_analysis.items():
-        status = "✅" if analysis['target_success_rate'] >= 80 else "❌"
+        status = "[OK]" if analysis['target_success_rate'] >= 80 else "[ERROR]"
         print(f"  {status} {op_name}: {analysis['avg_duration_ms']:.1f}ms avg " +
               f"({analysis['target_success_rate']:.1f}% success, {analysis['call_count']} calls)")
     
@@ -535,7 +805,7 @@ def save_report(report, output_file="performance_report.json"):
         print(f"📄 Performance report saved to: {output_file}")
         return True
     except Exception as e:
-        print(f"❌ Failed to save report: {e}")
+        print(f"[ERROR] Failed to save report: {e}")
         return False
 
 def print_summary(report):
@@ -562,7 +832,7 @@ def print_summary(report):
     for i, op in enumerate(report['memory_intensive_operations'][:3], 1):
         print(f"  {i}. {op['operation']}: {op['memory_delta_mb']:.1f}MB")
     
-    print("\n📊 OPERATION BREAKDOWN:")
+    print("\n[DASHBOARD] OPERATION BREAKDOWN:")
     for op_type, stats in report['operations'].items():
         print(f"  {op_type}: {stats['avg_duration_ms']:.1f}ms avg ({stats['count']} runs)")
     
@@ -570,7 +840,7 @@ def print_summary(report):
 
 def run_full_benchmark():
     """Run the complete benchmark suite."""
-    print("🚀 Starting comprehensive performance benchmark...")
+    print("[ROCKET] Starting comprehensive performance benchmark...")
     print("⏰ This may take several minutes...")
     
     # Initialize metrics collection
@@ -606,13 +876,82 @@ def run_full_benchmark():
             
             return report
         else:
-            print("❌ Failed to generate performance report")
+            print("[ERROR] Failed to generate performance report")
             return None
             
     except Exception as e:
-        print(f"❌ Benchmark failed: {e}")
+        print(f"[ERROR] Benchmark failed: {e}")
         traceback.print_exc()
         return None
+
+
+def run_performance_benchmarks(audio_files: List[str]) -> Dict[str, Any]:
+    """Run performance benchmarks on specific audio files."""
+    profiler = EnhancedPerformanceProfiler()
+    
+    try:
+        results = profiler.benchmark_suite(audio_files)
+        return {
+            'avg_processing_time_ms': results.get('avg_processing_time_ms', 0),
+            'avg_memory_usage_mb': results.get('avg_memory_usage_mb', 0),
+            'total_files_processed': len(audio_files),
+            'success_rate': results.get('success_rate', 0),
+            'benchmark_timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+    except Exception as e:
+        print(f"[ERROR] Performance benchmarks failed: {e}")
+        return {}
+
+
+def run_memory_profiling() -> Dict[str, Any]:
+    """Run memory profiling analysis."""
+    try:
+        # Try to import memory_profiler, fallback if not available
+        try:
+            import memory_profiler
+            MEMORY_PROFILER_AVAILABLE = True
+        except ImportError:
+            MEMORY_PROFILER_AVAILABLE = False
+        
+        if not MEMORY_PROFILER_AVAILABLE:
+            return {
+                'model_loading': {'total_model_memory_mb': 0, 'error': 'memory_profiler not available'},
+                'processing': {'peak_memory_mb': 0, 'error': 'memory_profiler not available'}
+            }
+        
+        # Run basic memory profiling
+        import psutil
+        process = psutil.Process()
+        
+        # Memory before and after model loading
+        memory_before = process.memory_info().rss / (1024 * 1024)
+        
+        # Simulate model loading
+        from modules.model_loader import ModelLoader
+        loader = ModelLoader()
+        # Just initialize, don't load all models to avoid excessive memory usage
+        
+        memory_after = process.memory_info().rss / (1024 * 1024)
+        
+        return {
+            'model_loading': {
+                'memory_before_mb': memory_before,
+                'memory_after_mb': memory_after,
+                'total_model_memory_mb': memory_after - memory_before
+            },
+            'processing': {
+                'current_memory_mb': memory_after,
+                'peak_memory_mb': memory_after  # Simplified for now
+            }
+        }
+        
+    except Exception as e:
+        return {
+            'error': str(e),
+            'model_loading': {'total_model_memory_mb': 0},
+            'processing': {'peak_memory_mb': 0}
+        }
+
 
 if __name__ == "__main__":
     # Set optimal environment for benchmarking

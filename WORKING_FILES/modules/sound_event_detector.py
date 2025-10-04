@@ -1,4 +1,4 @@
-# modules/sound_event_detector.py
+﻿# modules/sound_event_detector.py
 import numpy as np
 import librosa
 from modules.model_loader import yamnet_model, yamnet_classes, get_model, get_models
@@ -56,5 +56,5 @@ def analyze_sound_events(audio_input, threshold=0.3):
         return detected
 
     except Exception as e:
-        print(f" ⚠️ Error analyzing sounds: {e}")
+        print(f" [WARNING] Error analyzing sounds: {e}")
         return []

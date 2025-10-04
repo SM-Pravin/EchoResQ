@@ -1,4 +1,4 @@
-"""
+﻿"""
 Enhanced configuration management system for Emergency AI.
 Supports YAML/TOML configuration files with CLI override capabilities.
 """
@@ -112,7 +112,7 @@ class UIConfig:
     """User interface configuration."""
     streamlit: Dict[str, Any] = field(default_factory=lambda: {
         "page_title": "Emergency AI - Audio Analysis",
-        "page_icon": "🚨",
+        "page_icon": "[EMERGENCY]",
         "layout": "wide",
         "sidebar_state": "expanded",
         "update_interval_ms": 500,
@@ -216,7 +216,7 @@ class ConfigManager:
         """Load configuration from YAML or TOML file."""
         path = config_path or self.config_path
         if not path or not os.path.exists(path):
-            print(f"⚠️ Config file not found: {path}, using defaults")
+            print(f"[WARNING] Config file not found: {path}, using defaults")
             return
         
         try:
@@ -229,10 +229,10 @@ class ConfigManager:
                     data = yaml.safe_load(f)
             
             self._update_config_from_dict(data)
-            print(f"✅ Configuration loaded from {path}")
+            print(f"[OK] Configuration loaded from {path}")
             
         except Exception as e:
-            print(f"❌ Error loading config from {path}: {e}")
+            print(f"[ERROR] Error loading config from {path}: {e}")
             print("Using default configuration")
     
     def _update_config_from_dict(self, data: Dict[str, Any]) -> None:
@@ -433,9 +433,9 @@ Examples:
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 yaml.dump(config_dict, f, default_flow_style=False, indent=2)
-            print(f"✅ Configuration saved to {path}")
+            print(f"[OK] Configuration saved to {path}")
         except Exception as e:
-            print(f"❌ Error saving config to {path}: {e}")
+            print(f"[ERROR] Error saving config to {path}: {e}")
     
     def _config_to_dict(self) -> Dict[str, Any]:
         """Convert configuration object to dictionary."""
@@ -468,7 +468,7 @@ Examples:
                 for key, value in config_dict[section].items():
                     print(f"  {key}: {value}")
             else:
-                print(f"❌ Section '{section}' not found")
+                print(f"[ERROR] Section '{section}' not found")
         else:
             print("📋 Current Configuration:")
             for section_name, section_data in config_dict.items():

@@ -1,4 +1,4 @@
-# modules/model_optimization.py
+﻿# modules/model_optimization.py
 """
 Advanced model optimization utilities for ONNX export, quantization, and TorchScript compilation.
 Provides faster, more deterministic CPU inference with automatic INT8 quantization and GPU/DirectML support.
@@ -59,11 +59,11 @@ def export_wav2vec_to_onnx(model, feature_extractor, output_path, sample_rate=16
                 'logits': {0: 'batch_size'}
             }
         )
-        print(f"✅ Wav2Vec2 model exported to ONNX: {output_path}")
+        print(f"[OK] Wav2Vec2 model exported to ONNX: {output_path}")
         return True
         
     except Exception as e:
-        print(f"⚠️ Failed to export Wav2Vec2 to ONNX: {e}")
+        print(f"[WARNING] Failed to export Wav2Vec2 to ONNX: {e}")
         return False
 
 
@@ -106,11 +106,11 @@ def export_distilroberta_to_onnx(model, tokenizer, output_path, max_length=512):
                 'logits': {0: 'batch_size'}
             }
         )
-        print(f"✅ DistilRoBERTa model exported to ONNX: {output_path}")
+        print(f"[OK] DistilRoBERTa model exported to ONNX: {output_path}")
         return True
         
     except Exception as e:
-        print(f"⚠️ Failed to export DistilRoBERTa to ONNX: {e}")
+        print(f"[WARNING] Failed to export DistilRoBERTa to ONNX: {e}")
         return False
 
 
@@ -133,11 +133,11 @@ def quantize_model(model, example_inputs, output_path):
         
         # Save quantized model
         torch.save(quantized_model.state_dict(), output_path)
-        print(f"✅ Model quantized and saved: {output_path}")
+        print(f"[OK] Model quantized and saved: {output_path}")
         return quantized_model
         
     except Exception as e:
-        print(f"⚠️ Failed to quantize model: {e}")
+        print(f"[WARNING] Failed to quantize model: {e}")
         return None
 
 
@@ -156,11 +156,11 @@ def create_torchscript_model(model, example_inputs, output_path):
             traced_model = torch.jit.trace(model, example_inputs)
             traced_model.save(output_path)
         
-        print(f"✅ TorchScript model saved: {output_path}")
+        print(f"[OK] TorchScript model saved: {output_path}")
         return traced_model
         
     except Exception as e:
-        print(f"⚠️ Failed to create TorchScript model: {e}")
+        print(f"[WARNING] Failed to create TorchScript model: {e}")
         return None
 
 
@@ -207,7 +207,7 @@ class EnhancedONNXInferenceWrapper:
             self.input_names = [input.name for input in self.session.get_inputs()]
             self.output_names = [output.name for output in self.session.get_outputs()]
             
-            print(f"✅ ONNX model loaded: {os.path.basename(self.onnx_path)}")
+            print(f"[OK] ONNX model loaded: {os.path.basename(self.onnx_path)}")
             print(f"   Providers: {self.session.get_providers()}")
             
             # Try to create quantized version if enabled
@@ -215,10 +215,10 @@ class EnhancedONNXInferenceWrapper:
                 self._create_quantized_model()
                 
         except ImportError:
-            print("⚠️ onnxruntime not available, install with: pip install onnxruntime")
+            print("[WARNING] onnxruntime not available, install with: pip install onnxruntime")
         except Exception as e:
             log_error("onnx_initialization", e)
-            print(f"⚠️ Failed to load ONNX model: {e}")
+            print(f"[WARNING] Failed to load ONNX model: {e}")
     
     def _get_optimal_providers(self) -> List[str]:
         """Get optimal execution providers based on system capabilities."""
@@ -272,7 +272,7 @@ class EnhancedONNXInferenceWrapper:
                     reduce_range=True,  # Better compatibility with older CPUs
                     optimize_model=True
                 )
-                print(f"   ✅ Quantized model created: {self.quantized_path.name}")
+                print(f"   [OK] Quantized model created: {self.quantized_path.name}")
             
             # Load quantized session
             import onnxruntime as ort
@@ -284,10 +284,10 @@ class EnhancedONNXInferenceWrapper:
             )
             
         except ImportError:
-            print("   ⚠️ ONNX quantization not available")
+            print("   [WARNING] ONNX quantization not available")
         except Exception as e:
             log_error("onnx_quantization", e)
-            print(f"   ⚠️ Failed to create quantized model: {e}")
+            print(f"   [WARNING] Failed to create quantized model: {e}")
     
     def predict(self, inputs, use_quantized: bool = None) -> Optional[np.ndarray]:
         """Run inference with automatic quantization fallback."""
@@ -409,7 +409,7 @@ class ModelOptimizer:
     
     def optimize_all_models(self) -> Dict[str, bool]:
         """Optimize all available models for production."""
-        print("🚀 Starting comprehensive model optimization...")
+        print("[ROCKET] Starting comprehensive model optimization...")
         
         results = {}
         
@@ -436,7 +436,7 @@ class ModelOptimizer:
             afe = get_model('audio_feature_extractor')
             
             if w2v is None or afe is None:
-                print("   ⚠️ Wav2Vec2 model not available")
+                print("   [WARNING] Wav2Vec2 model not available")
                 return False
             
             base_name = "wav2vec2_emotion"
@@ -454,7 +454,7 @@ class ModelOptimizer:
             # ONNX export with enhanced options
             onnx_path = self.output_dir / f"{base_name}.onnx"
             if self._export_wav2vec_enhanced(w2v, afe, str(onnx_path)):
-                print(f"   ✅ ONNX export successful")
+                print(f"   [OK] ONNX export successful")
                 
                 # Test ONNX inference
                 wrapper = EnhancedONNXInferenceWrapper(
@@ -466,9 +466,9 @@ class ModelOptimizer:
                     # Benchmark performance
                     benchmark_results = wrapper.benchmark(tuple(dummy_inputs.values()))
                     self.optimization_results[base_name] = benchmark_results
-                    print(f"   📊 Benchmark: {benchmark_results.get('original_ms', 0):.1f}ms")
+                    print(f"   [DASHBOARD] Benchmark: {benchmark_results.get('original_ms', 0):.1f}ms")
                     if 'quantized_ms' in benchmark_results:
-                        print(f"   📊 Quantized: {benchmark_results['quantized_ms']:.1f}ms (" +
+                        print(f"   [DASHBOARD] Quantized: {benchmark_results['quantized_ms']:.1f}ms (" +
                               f"{benchmark_results.get('speedup_ratio', 1):.1f}x speedup)")
             else:
                 success = False
@@ -476,18 +476,18 @@ class ModelOptimizer:
             # TorchScript optimization
             torchscript_path = self.output_dir / f"{base_name}_torchscript.pt"
             if self._create_torchscript_enhanced(w2v, tuple(dummy_inputs.values()), str(torchscript_path)):
-                print(f"   ✅ TorchScript export successful")
+                print(f"   [OK] TorchScript export successful")
             
             # Dynamic quantization
             quantized_path = self.output_dir / f"{base_name}_quantized.pth"
             if self._quantize_model_enhanced(w2v, tuple(dummy_inputs.values()), str(quantized_path)):
-                print(f"   ✅ PyTorch quantization successful")
+                print(f"   [OK] PyTorch quantization successful")
             
             return success
             
         except Exception as e:
             log_error("wav2vec2_optimization", e)
-            print(f"   ❌ Wav2Vec2 optimization failed: {e}")
+            print(f"   [ERROR] Wav2Vec2 optimization failed: {e}")
             return False
     
     def _optimize_distilroberta(self) -> bool:
@@ -497,7 +497,7 @@ class ModelOptimizer:
             
             text_pipe = get_model('text_classifier')
             if text_pipe is None:
-                print("   ⚠️ DistilRoBERTa model not available")
+                print("   [WARNING] DistilRoBERTa model not available")
                 return False
             
             model = text_pipe.model
@@ -518,7 +518,7 @@ class ModelOptimizer:
             # ONNX export
             onnx_path = self.output_dir / f"{base_name}.onnx"
             if self._export_distilroberta_enhanced(model, tokenizer, str(onnx_path)):
-                print(f"   ✅ ONNX export successful")
+                print(f"   [OK] ONNX export successful")
                 
                 # Test and benchmark
                 wrapper = EnhancedONNXInferenceWrapper(
@@ -529,9 +529,9 @@ class ModelOptimizer:
                 if wrapper.session is not None:
                     benchmark_results = wrapper.benchmark(tuple(dummy_inputs.values()))
                     self.optimization_results[base_name] = benchmark_results
-                    print(f"   📊 Benchmark: {benchmark_results.get('original_ms', 0):.1f}ms")
+                    print(f"   [DASHBOARD] Benchmark: {benchmark_results.get('original_ms', 0):.1f}ms")
                     if 'quantized_ms' in benchmark_results:
-                        print(f"   📊 Quantized: {benchmark_results['quantized_ms']:.1f}ms (" +
+                        print(f"   [DASHBOARD] Quantized: {benchmark_results['quantized_ms']:.1f}ms (" +
                               f"{benchmark_results.get('speedup_ratio', 1):.1f}x speedup)")
             else:
                 success = False
@@ -547,7 +547,7 @@ class ModelOptimizer:
             
         except Exception as e:
             log_error("distilroberta_optimization", e)
-            print(f"   ❌ DistilRoBERTa optimization failed: {e}")
+            print(f"   [ERROR] DistilRoBERTa optimization failed: {e}")
             return False
     
     def _optimize_yamnet(self) -> bool:
@@ -557,12 +557,12 @@ class ModelOptimizer:
             
             yamnet = get_model('yamnet_model')
             if yamnet is None:
-                print("   ⚠️ YAMNet model not available")
+                print("   [WARNING] YAMNet model not available")
                 return False
             
             # YAMNet optimization is more complex due to TensorFlow nature
             # For now, just note it's available
-            print("   ℹ️ YAMNet model available but optimization not implemented yet")
+            print("   [INFO] YAMNet model available but optimization not implemented yet")
             return True
             
         except Exception as e:
