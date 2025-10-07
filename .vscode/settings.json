@@ -1,0 +1,23 @@
+{
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "WORKING_FILES/tests"
+    ],
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.python"
+    },
+    "ruff.enable": true,
+    "ruff.lint.select": [
+        "E",
+        "F",
+        "I",
+        "UP",
+        "N"
+    ],
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/.mypy_cache": true
+    }
+}

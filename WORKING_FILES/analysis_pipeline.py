@@ -1,4 +1,4 @@
-"""
+﻿"""
 Main entrypoint for the emergency AI pipeline.
 Extended to:
  - parallelize per-chunk analysis (ProcessPoolExecutor, spawn context)
@@ -16,7 +16,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing
 
 # Environment tweaks should be set early
-os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+# Vosk removed; no VOSK_LOG_LEVEL needed
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
@@ -47,6 +47,21 @@ from modules.env_config import (
     get_enable_batch_processing,
     get_audio_batch_size,
     get_parallel_max_workers,
+)
+from modules.smart_batch_processing import (
+    AdaptiveBatchProcessor,
+    BatchProcessingConfig,
+    process_audio_chunks_smart_batch,
+    adaptive_audio_chunking,
+    optimize_batch_processing_for_system,
+    get_batch_processor
+)
+from modules.in_memory_audio import AudioBuffer, get_audio_processor
+from modules.real_time_performance_monitor import (
+    get_performance_monitor,
+    performance_tracking,
+    get_system_performance_snapshot,
+    setup_pipeline_monitoring
 )
 
 # Parameters (kept from original)
@@ -129,7 +144,7 @@ def _init_worker_models():
             'get_distress_token': get_distress_token
         }
     except Exception as e:
-        print(f"⚠️ Worker failed to initialize models: {e}")
+        print(f"[WARNING] Worker failed to initialize models: {e}")
         _worker_models = {}
 
 def _analyze_chunk_worker(args):
@@ -193,7 +208,7 @@ def _analyze_chunk_worker(args):
         }
 
     except Exception as e:
-        print(f"⚠️ Worker error processing chunk {args[0] if args else 'unknown'}: {e}")
+        print(f"[WARNING] Worker error processing chunk {args[0] if args else 'unknown'}: {e}")
         # On any failure inside a worker, return a safe default chunk result
         return {
             "index": int(args[0] if args else 0),
@@ -250,7 +265,7 @@ def analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels
                 for fut in as_completed(futures):
                     results.append(fut.result())
     except Exception as e:
-        print(f"⚠️ Parallel processing failed, falling back to sequential: {e}")
+        print(f"[WARNING] Parallel processing failed, falling back to sequential: {e}")
         # Fallback: If parallel executor fails (rare), run sequentially
         # This ensures the pipeline remains robust on minimal systems.
         results = []
@@ -262,13 +277,133 @@ def analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels
     return results
 
 
+def analyze_chunks_smart_batch(chunks, max_rms, silence_thresh, canonical_labels):
+    """
+    Smart batch-enabled chunk analysis with adaptive sizing and dynamic resource allocation.
+    Uses intelligent batch processing based on system resources and performance metrics.
+    """
+    if not chunks:
+        return []
+    
+    print(f"[ROCKET] Smart batch processing {len(chunks)} chunks")
+    
+    try:
+        # Convert file-based chunks to AudioBuffer objects for in-memory processing
+        audio_processor = get_audio_processor()
+        audio_buffers = []
+        
+        for i, chunk_info in enumerate(chunks):
+            file_path = chunk_info.get("file", "")
+            start_time = chunk_info.get("start", 0.0)
+            end_time = chunk_info.get("end", 30.0)
+            
+            if os.path.exists(file_path):
+                # Load chunk data
+                audio_data, sample_rate = librosa.load(file_path, sr=None)
+                
+                # Create AudioBuffer
+                audio_buffer = AudioBuffer(
+                    data=audio_data,
+                    sample_rate=sample_rate,
+                    start_time=start_time,
+                    end_time=end_time,
+                    metadata={'chunk_index': i, 'original_file': file_path}
+                )
+                audio_buffers.append(audio_buffer)
+        
+        if not audio_buffers:
+            print("[WARNING] No valid audio buffers created, falling back to parallel processing")
+            return analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels)
+        
+        # Create processing function that handles AudioBuffer objects
+        def process_audio_buffer(audio_buffer: AudioBuffer):
+            try:
+                chunk_index = audio_buffer.metadata.get('chunk_index', 0)
+                original_chunk = chunks[chunk_index] if chunk_index < len(chunks) else {}
+                
+                # Convert AudioBuffer back to chunk format for existing analysis functions
+                temp_file = None
+                try:
+                    # Create temporary file for existing analysis functions
+                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                        sf.write(tmp.name, audio_buffer.data, audio_buffer.sample_rate)
+                        temp_file = tmp.name
+                    
+                    # Create chunk info for analysis
+                    chunk_for_analysis = {
+                        **original_chunk,
+                        'file': temp_file,
+                        'data': audio_buffer.data,
+                        'sample_rate': audio_buffer.sample_rate,
+                        'start': audio_buffer.start_time,
+                        'end': audio_buffer.end_time,
+                        'index': chunk_index
+                    }
+                    
+                    # Use existing analysis function
+                    result = _analyze_chunk_worker((
+                        chunk_index, chunk_for_analysis, max_rms, silence_thresh, canonical_labels
+                    ))
+                    
+                    return result
+                    
+                finally:
+                    # Clean up temporary file
+                    if temp_file and os.path.exists(temp_file):
+                        try:
+                            os.unlink(temp_file)
+                        except Exception:
+                            pass
+            
+            except Exception as e:
+                print(f"[ERROR] Error processing audio buffer {chunk_index}: {e}")
+                return {
+                    'index': chunk_index,
+                    'error': str(e),
+                    'transcription': "",
+                    'audio_emotion': {},
+                    'text_emotion': {},
+                    'fused_emotion': {},
+                    'distress_token': "UNKNOWN",
+                    'severity': 0,
+                    'sound_events': []
+                }
+        
+        # Get optimal batch processing configuration
+        batch_config = optimize_batch_processing_for_system()
+        
+        # Use smart batch processing
+        batch_processor = AdaptiveBatchProcessor(batch_config)
+        results = batch_processor.process_batch_async(
+            audio_buffers,
+            process_audio_buffer
+        )
+        
+        # Sort results by index
+        results.sort(key=lambda d: int(d.get("index", 0)))
+        
+        # Display performance stats
+        stats = batch_processor.get_performance_stats()
+        if stats.get('recent_avg_throughput', 0) > 0:
+            print(f"[DASHBOARD] Smart batch performance: {stats['recent_avg_throughput']:.1f} chunks/sec, "
+                  f"{stats['recent_avg_processing_time_ms']:.0f}ms processing time")
+        
+        return results
+        
+    except Exception as e:
+        print(f"[WARNING] Smart batch processing failed, falling back to parallel: {e}")
+        return analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels)
+
+
 def analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels):
     """
-    Batch-enabled chunk analysis that processes non-silent chunks in batches for efficiency.
-    Falls back to individual processing if batch processing fails.
+    Legacy batch-enabled chunk analysis - now redirects to smart batch processing.
     """
     if not chunks or not ENABLE_BATCH_PROCESSING:
         return analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels)
+    
+    # Use smart batch processing instead of legacy batch processing
+    return analyze_chunks_smart_batch(chunks, max_rms, silence_thresh, canonical_labels)
     
     try:
         from modules.emotion_audio import analyze_audio_emotion_batch
@@ -339,7 +474,7 @@ def analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels):
                     })
                     
                 except Exception as e:
-                    print(f"⚠️ Error processing batch chunk {idx}: {e}")
+                    print(f"[WARNING] Error processing batch chunk {idx}: {e}")
                     # Add error result
                     results.append({
                         "index": idx,
@@ -358,7 +493,7 @@ def analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels):
         return results
         
     except Exception as e:
-        print(f"⚠️ Batch processing failed, falling back to parallel: {e}")
+        print(f"[WARNING] Batch processing failed, falling back to parallel: {e}")
         return analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels)
 
 
@@ -378,6 +513,10 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
         "reason": "", "error": None, "fused_scores": {}, "chunks": []
     }
     fixed_file = None
+    
+    # Get performance monitor for tracking
+    performance_monitor = get_performance_monitor()
+    pipeline_start_time = time.perf_counter()
 
     try:
         # Preprocess to 16k mono PCM WAV in a temporary directory
@@ -398,21 +537,73 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
 
         # FAST MODE (no chunk split or sound analysis)
         if fast_mode:
-            audio_scores = analyze_audio_emotion(fixed_file)
-            confidence, emotion, fused_scores = fuse_emotions(audio_scores, text_scores)
-            distress = get_distress_token(emotion, confidence)
-            distress = check_keywords(transcript, distress)
+            with performance_tracking(performance_monitor, "fast_mode_processing"):
+                audio_scores = analyze_audio_emotion(fixed_file)
+                confidence, emotion, fused_scores = fuse_emotions(audio_scores, text_scores)
+                distress = get_distress_token(emotion, confidence)
+                distress = check_keywords(transcript, distress)
 
-            results.update({
-                "emotion": emotion, "confidence": confidence, "distress": distress,
-                "reason": "fast mode: skipped chunked audio & sound analysis",
-                "fused_scores": fused_scores
-            })
+                results.update({
+                    "emotion": emotion, "confidence": confidence, "distress": distress,
+                    "reason": "fast mode: skipped chunked audio & sound analysis",
+                    "fused_scores": fused_scores
+                })
+            
+            # Record total pipeline time
+            pipeline_end_time = time.perf_counter()
+            pipeline_duration_ms = (pipeline_end_time - pipeline_start_time) * 1000
+            performance_monitor.record_processing_time("total_pipeline", pipeline_duration_ms)
+            
             log_call(caller_id, transcript, emotion, distress, {"fused": fused_scores, "sounds": []}, results["reason"])
             return results
 
-        # --- FULL ANALYSIS (CHUNKED, in-memory) ---
-        chunks = split_audio_chunks(fixed_file, max_chunk=CHUNK_SIZE_SECONDS, overlap=int(HOP_SIZE_SECONDS), in_memory=True)
+        # --- FULL ANALYSIS (ADAPTIVE CHUNKED, in-memory) ---
+        # Use adaptive chunking for optimal performance
+        try:
+            # Load audio for adaptive analysis
+            audio_data, sample_rate = librosa.load(fixed_file, sr=None)
+            audio_duration = len(audio_data) / sample_rate
+            
+            # Create AudioBuffer for adaptive chunking
+            audio_buffer = AudioBuffer(
+                data=audio_data,
+                sample_rate=sample_rate,
+                start_time=0.0,
+                end_time=audio_duration,
+                metadata={'source_file': audio_file, 'caller_id': caller_id}
+            )
+            
+            # Get optimal batch configuration
+            batch_config = optimize_batch_processing_for_system()
+            
+            # Use adaptive chunking
+            audio_chunks = adaptive_audio_chunking(audio_buffer, batch_config)
+            
+            # Convert AudioBuffer chunks back to legacy format for compatibility
+            chunks = []
+            for i, chunk_buffer in enumerate(audio_chunks):
+                # Create temporary file for chunk
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                    sf.write(tmp.name, chunk_buffer.data, chunk_buffer.sample_rate)
+                    
+                    chunk_info = {
+                        'file': tmp.name,
+                        'start': chunk_buffer.start_time,
+                        'end': chunk_buffer.end_time,
+                        'index': i,
+                        'data': chunk_buffer.data,
+                        'sr': chunk_buffer.sample_rate,
+                        'duration': chunk_buffer.duration
+                    }
+                    chunks.append(chunk_info)
+            
+            print(f"🎵 Adaptive chunking created {len(chunks)} optimized chunks "
+                  f"for {audio_duration:.1f}s audio")
+            
+        except Exception as e:
+            print(f"[WARNING] Adaptive chunking failed, using legacy method: {e}")
+            # Fallback to original chunking
+            chunks = split_audio_chunks(fixed_file, max_chunk=CHUNK_SIZE_SECONDS, overlap=int(HOP_SIZE_SECONDS), in_memory=True)
 
         canonical_labels = ["angry", "happy", "neutral", "sad"]
         aggregated_fused = {k: 0.0 for k in canonical_labels}
@@ -438,11 +629,24 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
         silence_thresh = max_rms * SILENCE_RMS_THRESHOLD_RATIO if max_rms > 0 else 0.0
 
         # Choose processing method: batch > parallel > sequential
-        if ENABLE_BATCH_PROCESSING and len(chunks) >= 2:
-            chunks_info = analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels)
-        else:
-            max_workers = _get_max_workers()
-            chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=max_workers)
+        with performance_tracking(performance_monitor, "chunk_processing"):
+            if ENABLE_BATCH_PROCESSING and len(chunks) >= 2:
+                chunk_start_time = time.perf_counter()
+                chunks_info = analyze_chunks_in_batch(chunks, max_rms, silence_thresh, canonical_labels)
+                chunk_end_time = time.perf_counter()
+                
+                # Record throughput
+                chunk_duration = chunk_end_time - chunk_start_time
+                performance_monitor.record_throughput(len(chunks), chunk_duration)
+            else:
+                max_workers = _get_max_workers()
+                chunk_start_time = time.perf_counter()
+                chunks_info = analyze_chunks_in_parallel(chunks, max_rms, silence_thresh, canonical_labels, max_workers=max_workers)
+                chunk_end_time = time.perf_counter()
+                
+                # Record throughput
+                chunk_duration = chunk_end_time - chunk_start_time
+                performance_monitor.record_throughput(len(chunks), chunk_duration)
 
         # Aggregate results (same logic as before)
         for c in chunks_info:
@@ -489,12 +693,22 @@ def process_audio_file(audio_file, fast_mode=False, return_chunks_details=False)
             "emotion": emotion, "confidence": confidence, "distress": distress,
             "sounds": sound_events_all, "reason": reason, "fused_scores": fused_scores, "chunks": chunks_info
         })
+        
+        # Record total pipeline performance
+        pipeline_end_time = time.perf_counter()
+        pipeline_duration_ms = (pipeline_end_time - pipeline_start_time) * 1000
+        performance_monitor.record_processing_time("total_pipeline", pipeline_duration_ms)
+        
+        # Log performance summary if verbose
+        if pipeline_duration_ms > 500:  # Log if slower than target
+            print(f"⏱️ Pipeline completed in {pipeline_duration_ms:.1f}ms "
+                  f"({len(chunks)} chunks, {len(sound_events_all)} sound events)")
 
         log_call(caller_id, transcript, emotion, distress, {"fused": fused_scores, "sounds": sound_events_all}, reason)
         return results
 
     except Exception as e:
-        print(f"❌ An error occurred during processing: {e}")
+        print(f"[ERROR] An error occurred during processing: {e}")
         traceback.print_exc()
         results["error"] = str(e)
         return results
@@ -558,8 +772,54 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
             log_call(caller_id, transcript, emo, distress, {"fused": fused, "sounds": []}, "fast stream")
             return final_results
 
-        # Full chunked processing using in-memory chunks
-        chunks = split_audio_chunks(fixed_file, max_chunk=chunk_size_seconds, overlap=int(hop_size_seconds), in_memory=True)
+        # Full chunked processing using adaptive smart chunking
+        try:
+            # Load audio for adaptive analysis
+            audio_data, sample_rate = librosa.load(fixed_file, sr=None)
+            audio_duration = len(audio_data) / sample_rate
+            
+            # Create AudioBuffer for adaptive chunking
+            audio_buffer = AudioBuffer(
+                data=audio_data,
+                sample_rate=sample_rate,
+                start_time=0.0,
+                end_time=audio_duration,
+                metadata={'source_file': audio_file, 'caller_id': caller_id, 'streaming': True}
+            )
+            
+            # Get optimal batch configuration for streaming
+            batch_config = optimize_batch_processing_for_system()
+            # For streaming, prefer smaller chunks for better responsiveness
+            batch_config.chunk_size_strategy = "audio_length_based"
+            
+            # Use adaptive chunking
+            audio_chunks = adaptive_audio_chunking(audio_buffer, batch_config)
+            
+            # Convert AudioBuffer chunks back to legacy format for compatibility
+            chunks = []
+            for i, chunk_buffer in enumerate(audio_chunks):
+                # Create temporary file for chunk
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                    sf.write(tmp.name, chunk_buffer.data, chunk_buffer.sample_rate)
+                    
+                    chunk_info = {
+                        'file': tmp.name,
+                        'start': chunk_buffer.start_time,
+                        'end': chunk_buffer.end_time,
+                        'index': i,
+                        'data': chunk_buffer.data,
+                        'sr': chunk_buffer.sample_rate,
+                        'duration': chunk_buffer.duration
+                    }
+                    chunks.append(chunk_info)
+            
+            print(f"🎵 Streaming adaptive chunking: {len(chunks)} optimized chunks "
+                  f"for {audio_duration:.1f}s audio")
+            
+        except Exception as e:
+            print(f"[WARNING] Streaming adaptive chunking failed, using legacy method: {e}")
+            # Fallback to original chunking
+            chunks = split_audio_chunks(fixed_file, max_chunk=chunk_size_seconds, overlap=int(hop_size_seconds), in_memory=True)
         canonical_labels = ["angry", "happy", "neutral", "sad"]
         aggregated_fused = {k: 0.0 for k in canonical_labels}
         total_weight = 0.0
@@ -681,7 +941,7 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
                         time.sleep(sleep_for)
 
                 except Exception as e:
-                    print(f" ⚠️ Error streaming chunk {idx}: {e}")
+                    print(f" [WARNING] Error streaming chunk {idx}: {e}")
                     chunk_result = {
                         "index": idx, "start_s": float(start_s), "end_s": float(end_s),
                         "rms": float(rms), "win_emotion": None, "win_conf": 0.0,
@@ -723,7 +983,7 @@ def process_audio_file_stream(audio_file, fast_mode=False, chunk_callback=None,
         return final_results
 
     except Exception as e:
-        print(f"❌ An error occurred during streaming processing: {e}")
+        print(f"[ERROR] An error occurred during streaming processing: {e}")
         traceback.print_exc()
         final_results["error"] = str(e)
         return final_results

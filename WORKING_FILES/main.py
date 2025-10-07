@@ -1,32 +1,31 @@
-# main.py
+﻿# main.py
 """
-Main entrypoint for the emergency AI pipeline.
+Enhanced main entrypoint for the Emergency AI pipeline with CLI support.
 
+Features:
 - Full-file transcription (Vosk)
 - Text-emotion on full transcript
 - Sliding-window audio emotion & sound-event detection (with overlap)
 - Keyword escalation and sound escalation
-- --fast flag: skip heavy chunked audio emotion/sound detection (fast transcription+keywords)
+- CLI configuration overrides for testing and deployment
+- YAML/TOML configuration support
 """
 
 import os
 import sys
+import argparse
 import tempfile
 import warnings
+from pathlib import Path
 
 # Environment tweaks should be set early
-os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+# Vosk removed; no VOSK_LOG_LEVEL needed
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 warnings.filterwarnings("ignore")
 try:
-    # --- ADD THESE LINES ---
-    # Explicitly silence TensorFlow's Python-level warnings
     import tensorflow as tf
     tf.get_logger().setLevel('ERROR')
-    # -----------------------
-
     from transformers.utils import logging as hf_logging
     hf_logging.set_verbosity_error()
 except Exception:
@@ -46,7 +45,9 @@ from modules.keyword_detector import check_keywords, severity_level
 from modules.sound_event_detector import analyze_sound_events
 from modules.logger import log_call
 
-# --- Import centralized environment config ---
+# Import new configuration manager
+from modules.config_manager import get_config_manager, ConfigManager
+# Import legacy config for backward compatibility
 from modules.env_config import (
     PARALLEL_MAX_WORKERS,
     ENABLE_BATCH_PROCESSING,
@@ -101,28 +102,59 @@ def remove_temp_files(prefix="chunk_"):
         pass
 
 
-def usage_and_exit():
-    print("Usage: python3 main.py <audio_file.wav> [--fast]")
-    print("  --fast   : skip chunked audio emotion & sound analysis (fast path)")
-    sys.exit(1)
+# Removed usage_and_exit - using argparse instead
 
 
 def main():
-    if len(sys.argv) < 2:
-        usage_and_exit()
-
-    audio_file = sys.argv[1]
-    fast_mode = "--fast" in sys.argv[2:]
+    # Set up configuration manager and CLI
+    config_manager = get_config_manager()
+    parser = config_manager.setup_cli_parser()
+    
+    # Add main.py specific arguments
+    parser.add_argument('audio_file', nargs='?', type=str,
+                       help='Path to audio file to analyze')
+    parser.add_argument('--fast', action='store_true',
+                       help='Fast mode: skip heavy audio chunking and sound analysis')
+    parser.add_argument('--output', '-o', type=str,
+                       help='Output file for results (JSON format)')
+    parser.add_argument('--caller-id', type=str,
+                       help='Override caller ID for logging')
+    
+    # Parse arguments
+    try:
+        args = parser.parse_args()
+    except SystemExit:
+        return
+    
+    # Apply CLI overrides to configuration
+    config_manager.apply_cli_overrides(args)
+    config = config_manager.config
+    
+    # Handle missing audio file
+    if not args.audio_file:
+        print("[ERROR] Error: Audio file path is required")
+        parser.print_help()
+        return
+    
+    audio_file = args.audio_file
+    fast_mode = args.fast
 
     if not os.path.exists(audio_file):
-        print(f"❌ Error: {audio_file} not found.")
+        print(f"[ERROR] Error: {audio_file} not found.")
         return
+    
+    # Print configuration if debug mode
+    if config.development.get('debug_mode', False):
+        print("[CONFIG] Configuration:")
+        config_manager.print_config('processing')
+        config_manager.print_config('fusion')
+        print()
 
     # Preprocess to 16k mono PCM WAV
     fixed_file = audio_file.replace(".wav", "_fixed.wav")
     preprocess_audio(audio_file, fixed_file)
 
-    caller_id = os.path.basename(audio_file).split(".")[0].upper()
+    caller_id = args.caller_id or os.path.basename(audio_file).split(".")[0].upper()
 
     # Full-file transcription (single pass) - keep it intact (no chunking)
     transcript = transcribe_audio(fixed_file)
@@ -142,7 +174,7 @@ def main():
         sound_events_all = []
         reason = "fast mode: skipped chunked audio & sound analysis"
         print("\n" + "=" * 50)
-        print("      🚨 EMERGENCY CALL REPORT (FAST) 🚨")
+        print("      [EMERGENCY] EMERGENCY CALL REPORT (FAST) [EMERGENCY]")
         print("=" * 50)
         print(f" Caller ID     : {caller_id}")
         print(f" Transcript    : {transcript if transcript else '(empty)'}")
@@ -230,7 +262,7 @@ def main():
 
         except Exception as e:
             # be resilient: continue to next chunk
-            print(f" ⚠️ Error processing chunk {chunk_path}: {e}")
+            print(f" [WARNING] Error processing chunk {chunk_path}: {e}")
             continue
 
     # Normalize aggregated audio fused scores
@@ -266,7 +298,7 @@ def main():
 
     # Pretty print final report
     print("\n" + "=" * 50)
-    print("      🚨 EMERGENCY CALL REPORT 🚨")
+    print("      [EMERGENCY] EMERGENCY CALL REPORT [EMERGENCY]")
     print("=" * 50)
     print(f" Caller ID     : {caller_id}")
     print(f" Transcript    : {transcript if transcript else '(empty)'}")

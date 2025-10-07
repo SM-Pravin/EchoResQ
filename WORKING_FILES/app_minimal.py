@@ -1,15 +1,43 @@
-import streamlit as st
+﻿import streamlit as st
 import os
+import sys
 import time
 import json
 import tempfile
 from modules.logger import log_error
+from modules.config_manager import get_config_manager
 
-# Minimal placeholder UI: upload -> analyze -> show raw structured results succinctly.
-# Assumes analysis_pipeline.process_audio_file exists and returns dict with keys like:
-#   distress, emotion, confidence, transcript, chunks, fused_scores, reason
+# Parse CLI arguments before Streamlit starts
+config_manager = get_config_manager()
 
-st.set_page_config(page_title="Emergency AI (Minimal)", page_icon="🚨", layout="wide")
+# Check for CLI arguments passed after -- in streamlit run command
+if "--" in sys.argv:
+    dash_index = sys.argv.index("--")
+    streamlit_args = sys.argv[dash_index + 1:]
+    
+    # Create a temporary parser for streamlit-specific overrides
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--config', type=str, help='Configuration file path')
+    parser.add_argument('--sensitivity', choices=['low', 'medium', 'high'], help='Detection sensitivity')
+    parser.add_argument('--live-audio', action='store_true', help='Enable live audio (future use)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    
+    try:
+        parsed_args, _ = parser.parse_known_args(streamlit_args)
+        config_manager.apply_cli_overrides(parsed_args)
+    except:
+        pass  # Ignore parsing errors for Streamlit
+
+# Get configuration
+config = config_manager.config
+
+# Set page config using values from configuration
+st.set_page_config(
+    page_title=config.ui.streamlit.get('page_title', 'Emergency AI (Minimal)'),
+    page_icon=config.ui.streamlit.get('page_icon', '[EMERGENCY]'),
+    layout=config.ui.streamlit.get('layout', 'wide')
+)
 
 @st.cache_resource
 def load_pipeline():
@@ -39,7 +67,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🚨 Emergency AI – Minimal UI")
+st.title("[EMERGENCY] Emergency AI – Minimal UI")
 st.caption("Lightweight placeholder interface. Upload audio, run analysis, view structured results.")
 
 col_u, col_opts = st.columns([3,1])
@@ -55,6 +83,7 @@ if uploaded is not None and (auto_run or run_button):
         tmp.write(uploaded.getvalue())
         path = tmp.name
     start = time.perf_counter()
+    result = None  # Initialize result variable
     if not process_audio_file:
         st.error("Pipeline not available.")
     else:
@@ -125,7 +154,7 @@ if uploaded is not None and (auto_run or run_button):
                         'distress': c.get('win_distress','-')
                     })
                 import pandas as pd  # local import to keep top lean
-                st.dataframe(pd.DataFrame(compact), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(compact), width='stretch', hide_index=True)
 
             # Raw JSON utilities
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)

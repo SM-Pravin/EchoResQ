@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Stress testing suite for Emergency AI pipeline.
 Tests system behavior under heavy load, concurrent requests, and edge cases.
@@ -136,7 +136,7 @@ class StressTestRunner:
                         })
         
         except Exception as e:
-            print(f"❌ Concurrent test failed: {e}")
+            print(f"[ERROR] Concurrent test failed: {e}")
         
         finally:
             # Cleanup test files
@@ -166,8 +166,8 @@ class StressTestRunner:
             'errors': [r['error'] for r in failed_tasks if r['error']]
         }
         
-        print(f"✅ Concurrent test completed: {analysis['success_rate']:.1%} success rate")
-        print(f"📊 Throughput: {analysis['throughput_tasks_per_second']:.2f} tasks/second")
+        print(f"[OK] Concurrent test completed: {analysis['success_rate']:.1%} success rate")
+        print(f"[DASHBOARD] Throughput: {analysis['throughput_tasks_per_second']:.2f} tasks/second")
         
         return analysis
     
@@ -196,7 +196,7 @@ class StressTestRunner:
                     peak_memory = max(peak_memory, current_memory)
                     
                 except Exception as e:
-                    print(f"    ❌ Error in iteration {i+1}: {e}")
+                    print(f"    [ERROR] Error in iteration {i+1}: {e}")
         
         finally:
             try:
@@ -217,13 +217,13 @@ class StressTestRunner:
             'iterations_completed': num_iterations
         }
         
-        print(f"📈 Memory delta: {analysis['memory_increase_mb']:.1f}MB, Peak: {analysis['peak_increase_mb']:.1f}MB")
+        print(f"[CHART] Memory delta: {analysis['memory_increase_mb']:.1f}MB, Peak: {analysis['peak_increase_mb']:.1f}MB")
         
         return analysis
     
     def edge_case_test(self):
         """Test edge cases and error handling."""
-        print("🎯 Running edge case tests...")
+        print("[TARGET] Running edge case tests...")
         
         tests = []
         
@@ -344,7 +344,7 @@ class StressTestRunner:
         successful_tests = [t for t in tests if t['success']]
         failed_tests = [t for t in tests if not t['success']]
         
-        print(f"✅ Edge case tests: {len(successful_tests)}/{len(tests)} passed")
+        print(f"[OK] Edge case tests: {len(successful_tests)}/{len(tests)} passed")
         
         return {
             'total_tests': len(tests),
@@ -355,7 +355,7 @@ class StressTestRunner:
     
     def run_full_stress_test(self):
         """Run the complete stress test suite."""
-        print("🚀 Starting comprehensive stress test...")
+        print("[ROCKET] Starting comprehensive stress test...")
         self.start_time = time.perf_counter()
         
         try:
@@ -405,7 +405,7 @@ class StressTestRunner:
             return final_results
             
         except Exception as e:
-            print(f"❌ Stress test suite failed: {e}")
+            print(f"[ERROR] Stress test suite failed: {e}")
             traceback.print_exc()
             return None
     
@@ -434,7 +434,7 @@ class StressTestRunner:
             print(f"💾 Stress test results saved to: {filename}")
             
         except Exception as e:
-            print(f"❌ Failed to save results: {e}")
+            print(f"[ERROR] Failed to save results: {e}")
     
     def _print_summary(self, results):
         """Print stress test summary."""
@@ -461,7 +461,7 @@ class StressTestRunner:
         
         # Edge case test
         edge_cases = results['edge_case_test']
-        print(f"\n🎯 Edge Case Test:")
+        print(f"\n[TARGET] Edge Case Test:")
         print(f"  Tests Passed: {edge_cases['successful_tests']}/{edge_cases['total_tests']}")
         
         # High load test
@@ -476,16 +476,16 @@ def main():
     """Main entry point for stress testing."""
     # Set environment for testing
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-    os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+    # Vosk removed; no VOSK_LOG_LEVEL needed
     
     runner = StressTestRunner()
     results = runner.run_full_stress_test()
     
     if results:
-        print("✅ Stress testing completed successfully")
+        print("[OK] Stress testing completed successfully")
         return 0
     else:
-        print("❌ Stress testing failed")
+        print("[ERROR] Stress testing failed")
         return 1
 
 if __name__ == "__main__":

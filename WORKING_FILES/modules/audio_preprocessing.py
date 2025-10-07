@@ -1,4 +1,4 @@
-# modules/audio_preprocessing.py
+﻿# modules/audio_preprocessing.py
 """
 Audio preprocessing helpers.
 
@@ -21,7 +21,7 @@ import numpy as np
 import webrtcvad
 import struct
 from typing import List
-import noisereduce as nr   # ✅ added noise reduction
+import noisereduce as nr   # [OK] added noise reduction
 
 # Constants / defaults
 DEFAULT_SR = 16000
@@ -61,10 +61,10 @@ def preprocess_audio(input_path, output_path, target_sr=DEFAULT_SR):
         y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
         sr = target_sr
 
-    # ✅ remove DC offset
+    # [OK] remove DC offset
     y = y - np.mean(y)
 
-    # ✅ apply noise reduction
+    # [OK] apply noise reduction
     y = denoise_with_spectral_gating(y, sr)
 
     # normalize to avoid clipping

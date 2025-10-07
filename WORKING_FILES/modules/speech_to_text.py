@@ -1,81 +1,173 @@
-# modules/speech_to_text.py
+﻿# modules/speech_to_text.py
 import json
 import numpy as np
-import soundfile as sf
-import librosa
-from vosk import KaldiRecognizer
-from modules.model_loader import vosk_model, get_model
+import tempfile
+
+# Optional imports with fallbacks
+try:
+    import soundfile as sf
+    SF_AVAILABLE = True
+except ImportError:
+    SF_AVAILABLE = False
+    print('[WARNING] soundfile not available in speech_to_text. Install with: pip install soundfile')
+    # Minimal fallback for sf.write using wave module
+    import wave
+    import contextlib
+    def _sf_write_fallback(path, data, samplerate):
+        """Minimal WAV writer fallback using wave module."""
+        data = np.asarray(data)
+        with contextlib.closing(wave.open(path, 'wb')) as wf:
+            wf.setnchannels(1 if data.ndim == 1 else data.shape[1])
+            wf.setsampwidth(2)  # 16-bit PCM
+            wf.setframerate(int(samplerate))
+            # Convert to int16 PCM
+            maxv = float(2 ** 15 - 1)
+            intdata = (data * maxv).astype(np.int16)
+            wf.writeframes(intdata.tobytes())
+    
+    class _SoundFileFallback:
+        write = staticmethod(_sf_write_fallback)
+    sf = _SoundFileFallback()
+
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+    print('[WARNING] librosa not available in speech_to_text. Install with: pip install librosa')
+    # Minimal fallback for librosa.load using wave module only
+    def _librosa_load_fallback(path, sr=None, mono=True):
+        """Minimal audio loading fallback using wave module for WAV files."""
+        # Fallback to wave module for WAV files
+        import wave
+        with contextlib.closing(wave.open(path, 'rb')) as wf:
+            sr_file = wf.getframerate()
+            frames = wf.readframes(wf.getnframes())
+            sampwidth = wf.getsampwidth()
+            if sampwidth == 2:
+                data = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            elif sampwidth == 1:
+                data = np.frombuffer(frames, dtype=np.uint8).astype(np.float32) / 128.0 - 1.0
+            else:
+                data = np.frombuffer(frames, dtype=np.float32)
+            if sr is not None and sr_file != sr and len(data) > 0:
+                duration = len(data) / float(sr_file)
+                new_len = int(max(1, round(duration * sr)))
+                old_times = np.linspace(0, duration, num=len(data))
+                new_times = np.linspace(0, duration, num=new_len)
+                data = np.interp(new_times, old_times, data).astype(np.float32)
+                sr_file = sr
+            return data, sr_file
+    
+    class _LibrosaFallback:
+        load = staticmethod(_librosa_load_fallback)
+    librosa = _LibrosaFallback()
+from modules.model_loader import whisper_medium, get_model
 from modules.keyword_detector import EMERGENCY_KEYWORDS
 
 TARGET_SR = 16000
-FRAME_SECONDS = 0.5  # feed Vosk 0.5s frames
+FRAME_SECONDS = 0.5
 
 # Streaming configuration
 STREAMING_BUFFER_SIZE = int(TARGET_SR * 2.0)  # 2 second buffer for streaming
 PARTIAL_EMIT_THRESHOLD = 0.3  # seconds of audio before emitting partial results
 
-def transcribe_audio(audio_path, sample_rate=TARGET_SR):
+
+def transcribe_audio_buffer(audio_buffer, sample_rate=TARGET_SR):
     """
-    Robust Vosk transcription:
-     - reads as float32
-     - converts to mono
-     - resamples if needed
-     - converts to int16 PCM before feeding KaldiRecognizer
-     - returns a single concatenated transcript string
+    Transcribe AudioBuffer object directly without file I/O.
     """
-    vm = vosk_model or get_model('vosk_model')
-    if vm is None:
+    from modules.in_memory_audio import AudioBuffer
+    
+    # Prefer faster-whisper if available
+    wm = whisper_medium or get_model('whisper_medium')
+    if wm is not None:
+        try:
+            # Write buffer to a temp wav file and use faster-whisper file-based transcribe for stability
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as tf:
+                sf.write(tf.name, audio_buffer.data, audio_buffer.sample_rate)
+                segments, info = wm.transcribe(tf.name, beam_size=5)
+                # faster-whisper may return Segment objects (attrs) or dicts. Normalize.
+                def _seg_get(s, k, default=None):
+                    if hasattr(s, k):
+                        return getattr(s, k)
+                    try:
+                        return s.get(k, default)
+                    except Exception:
+                        return default
+
+                texts = [(_seg_get(seg, 'text', '') or '').strip() for seg in segments if (_seg_get(seg, 'text', '') or '').strip()]
+                return ' '.join(texts).strip()
+        except Exception as e:
+            print(f"[WARNING] Whisper buffer transcription failed: {e}")
+
+    # Use faster-whisper if available; otherwise return empty string
+    wm = whisper_medium or get_model('whisper_medium')
+    if wm is None:
         return ""
 
     try:
-        # read as float32 (so we can safely resample / mono-average)
-        audio, sr = sf.read(audio_path, dtype="float32")
-        # audio shape: (n,) or (n, channels)
-        if audio.ndim > 1:
-            # average channels to mono
-            audio = np.mean(audio, axis=1)
-
-        if sr != sample_rate:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=sample_rate)
-            sr = sample_rate
-
-        # normalize to -1..1 if not already
-        maxv = float(np.max(np.abs(audio))) if audio.size > 0 else 1.0
-        if maxv > 0:
-            audio = audio / maxv
-
-        # convert to PCM16
-        pcm16 = (audio * 32767.0).astype('<i2')  # little-endian int16
-
-        rec = KaldiRecognizer(vm, sample_rate)
-        rec.SetWords(True)
-
-        transcript_parts = []
-        frame_size = int(FRAME_SECONDS * sample_rate)
-        for i in range(0, len(pcm16), frame_size):
-            frame = pcm16[i:i+frame_size].tobytes()
-            if rec.AcceptWaveform(frame):
+        # Get audio data from buffer
+        audio_data = audio_buffer.data
+        buffer_sr = audio_buffer.sample_rate
+        
+        # Resample if needed
+        if buffer_sr != TARGET_SR:
+            if LIBROSA_AVAILABLE:
+                audio_data = librosa.resample(audio_data, orig_sr=buffer_sr, target_sr=TARGET_SR)
+            else:
+                # Simple linear interpolation fallback
+                duration = len(audio_data) / float(buffer_sr)
+                new_len = int(max(1, round(duration * TARGET_SR)))
+                old_times = np.linspace(0, duration, num=len(audio_data))
+                new_times = np.linspace(0, duration, num=new_len)
+                audio_data = np.interp(new_times, old_times, audio_data).astype(np.float32)
+        
+        # Ensure mono
+        if audio_data.ndim > 1:
+            audio_data = np.mean(audio_data, axis=1)
+        
+        # Write to temp wav and use whisper model
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=True) as tf:
+            sf.write(tf.name, audio_data, buffer_sr)
+            segments, info = wm.transcribe(tf.name, beam_size=5)
+            def _seg_get(s, k, default=None):
+                if hasattr(s, k):
+                    return getattr(s, k)
                 try:
-                    res = json.loads(rec.Result())
-                    t = res.get("text", "")
-                    if t:
-                        transcript_parts.append(t)
+                    return s.get(k, default)
                 except Exception:
-                    pass
+                    return default
 
-        # final
-        try:
-            final_res = json.loads(rec.FinalResult())
-            if "text" in final_res and final_res["text"]:
-                transcript_parts.append(final_res["text"])
-        except Exception:
-            pass
-
-        return " ".join([t for t in transcript_parts if t]).strip()
-
+            texts = [(_seg_get(seg, 'text', '') or '').strip() for seg in segments if (_seg_get(seg, 'text', '') or '').strip()]
+            return ' '.join(texts).strip()
     except Exception as e:
-        # Don't crash main; upstream handles empty transcript
-        print(f" ⚠️ Error in Vosk transcription: {e}")
+        print(f"[ERROR] Whisper buffer transcription error: {e}")
+        return ""
+
+def transcribe_audio(audio_path, sample_rate=TARGET_SR):
+    """
+    Transcribe an audio file using faster-whisper (Whisper medium).
+    Falls back to returning an empty string if the whisper model is not available or fails.
+    """
+    wm = whisper_medium or get_model('whisper_medium')
+    if wm is None:
+        return ""
+
+    try:
+        segments, info = wm.transcribe(audio_path, beam_size=5)
+        def _seg_get(s, k, default=None):
+            if hasattr(s, k):
+                return getattr(s, k)
+            try:
+                return s.get(k, default)
+            except Exception:
+                return default
+
+        texts = [(_seg_get(seg, 'text', '') or '').strip() for seg in segments if (_seg_get(seg, 'text', '') or '').strip()]
+        return ' '.join(texts).strip()
+    except Exception as e:
+        print(f" [WARNING] Whisper transcription failed: {e}")
         return ""
 
 
@@ -95,8 +187,9 @@ def transcribe_audio_streaming(audio_path, partial_callback=None, keyword_callba
             - partial_results: list of partial results
             - keywords_detected: list of (keyword, timestamp) tuples
     """
-    vm = vosk_model or get_model('vosk_model')
-    if vm is None:
+    # Use faster-whisper for streaming results (segments)
+    wm = whisper_medium or get_model('whisper_medium')
+    if wm is None:
         return {"final_transcript": "", "partial_results": [], "keywords_detected": []}
 
     results = {
@@ -120,119 +213,55 @@ def transcribe_audio_streaming(audio_path, partial_callback=None, keyword_callba
         if maxv > 0:
             audio = audio / maxv
 
-        # Convert to PCM16
-        pcm16 = (audio * 32767.0).astype('<i2')
-        
-        rec = KaldiRecognizer(vm, sample_rate)
-        rec.SetWords(True)
+        # Use faster-whisper to get segments and timestamps
+            try:
+                segments, info = wm.transcribe(audio_path, beam_size=5)
+                transcript_parts = []
 
-        transcript_parts = []
-        frame_size = int(FRAME_SECONDS * sample_rate)
-        time_offset = 0.0
-        
-        for i in range(0, len(pcm16), frame_size):
-            frame = pcm16[i:i+frame_size].tobytes()
-            current_time = i / sample_rate
-            
-            if rec.AcceptWaveform(frame):
-                try:
-                    res = json.loads(rec.Result())
-                    text = res.get("text", "")
+                def _seg_get(s, k, default=None):
+                    if hasattr(s, k):
+                        return getattr(s, k)
+                    try:
+                        return s.get(k, default)
+                    except Exception:
+                        return default
+
+                for seg in segments:
+                    text = (_seg_get(seg, 'text', '') or '').strip()
+                    start = float(_seg_get(seg, 'start', 0.0) or 0.0)
                     if text:
                         transcript_parts.append(text)
-                        
-                        # Check for emergency keywords
-                        text_lower = text.lower()
-                        for keyword in EMERGENCY_KEYWORDS:
-                            if keyword.lower() in text_lower:
-                                keyword_detection = (keyword, current_time)
-                                results["keywords_detected"].append(keyword_detection)
-                                if keyword_callback:
-                                    try:
-                                        keyword_callback(keyword, current_time, text)
-                                    except Exception:
-                                        pass
-                        
-                        # Add to results
-                        results["partial_results"].append({
-                            "text": text,
-                            "timestamp": current_time,
-                            "is_final": True
+                        results['partial_results'].append({
+                            'text': text,
+                            'timestamp': start,
+                            'is_final': True
                         })
-                        
                         if partial_callback:
                             try:
-                                partial_callback(text, current_time, True)
+                                partial_callback(text, start, True)
                             except Exception:
                                 pass
-                                
-                except Exception:
-                    pass
-            else:
-                # Partial result
-                try:
-                    partial_res = json.loads(rec.PartialResult())
-                    partial_text = partial_res.get("partial", "")
-                    if partial_text and current_time >= PARTIAL_EMIT_THRESHOLD:
-                        
-                        # Check partial text for urgent keywords
-                        partial_lower = partial_text.lower()
+
                         for keyword in EMERGENCY_KEYWORDS:
-                            if keyword.lower() in partial_lower:
-                                keyword_detection = (keyword, current_time)
-                                results["keywords_detected"].append(keyword_detection)
-                                if keyword_callback:
-                                    try:
-                                        keyword_callback(keyword, current_time, partial_text)
-                                    except Exception:
-                                        pass
-                        
-                        results["partial_results"].append({
-                            "text": partial_text,
-                            "timestamp": current_time,
-                            "is_final": False
-                        })
-                        
-                        if partial_callback:
                             try:
-                                partial_callback(partial_text, current_time, False)
+                                if keyword.lower() in text.lower():
+                                    kd = (keyword, start)
+                                    results['keywords_detected'].append(kd)
+                                    if keyword_callback:
+                                        try:
+                                            keyword_callback(keyword, start, text)
+                                        except Exception:
+                                            pass
                             except Exception:
                                 pass
-                except Exception:
-                    pass
 
-        # Final result
-        try:
-            final_res = json.loads(rec.FinalResult())
-            if "text" in final_res and final_res["text"]:
-                final_text = final_res["text"]
-                transcript_parts.append(final_text)
-                
-                # Final keyword check
-                final_lower = final_text.lower()
-                for keyword in EMERGENCY_KEYWORDS:
-                    if keyword.lower() in final_lower:
-                        keyword_detection = (keyword, len(pcm16) / sample_rate)
-                        results["keywords_detected"].append(keyword_detection)
-                        if keyword_callback:
-                            try:
-                                keyword_callback(keyword, len(pcm16) / sample_rate, final_text)
-                            except Exception:
-                                pass
-                
-                results["partial_results"].append({
-                    "text": final_text,
-                    "timestamp": len(pcm16) / sample_rate,
-                    "is_final": True
-                })
-        except Exception:
-            pass
-
-        results["final_transcript"] = " ".join([t for t in transcript_parts if t]).strip()
-        return results
-
+                results['final_transcript'] = ' '.join(transcript_parts).strip()
+                return results
+            except Exception as e:
+                print(f" [WARNING] Whisper streaming transcription failed: {e}")
+                return results
     except Exception as e:
-        print(f" ⚠️ Error in streaming transcription: {e}")
+        print(f" [ERROR] Whisper streaming transcription error: {e}")
         return results
 
 

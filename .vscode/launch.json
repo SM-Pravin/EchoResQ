@@ -1,0 +1,37 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Streamlit: run app",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": [
+        "run",
+        "WORKING_FILES/app_streamlit.py"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "CLI: analyze sample",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "WORKING_FILES/main.py",
+      "args": [
+        "WORKING_FILES/audio_samples/0.wav",
+        "--fast"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Tests: pytest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "-q"
+      ],
+      "console": "integratedTerminal"
+    }
+  ]
+}

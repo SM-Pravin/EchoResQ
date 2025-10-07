@@ -1,0 +1,40 @@
+
+==================================================
+ Emergency Call Log - 2025-10-03T17:51:13.501844+00:00
+==================================================
+Caller ID     : TEST
+Transcript    : 
+Final Emotion : ANGRY
+Distress      : PEAK EMERGENCY DISTRESS
+Reason        : fast mode: skipped chunked audio & sound analysis
+==================================================
+
+==================================================
+ Emergency Call Log - 2025-10-03T17:52:04.833619+00:00
+==================================================
+Caller ID     : LONG_TEST
+Transcript    : the the the the
+Final Emotion : ANGRY
+Distress      : PEAK EMERGENCY DISTRESS
+Reason        : emotion escalation (chunk 0): angry (0.99)
+==================================================
+
+==================================================
+ Emergency Call Log - 2025-10-04T18:38:02.588964+00:00
+==================================================
+Caller ID     : 0
+Transcript    : 
+Final Emotion : ANGRY
+Distress      : MEDIUM DISTRESS
+Reason        : fast mode: skipped chunked audio & sound analysis
+==================================================
+
+==================================================
+ Emergency Call Log - 2025-10-04T18:42:07.780269+00:00
+==================================================
+Caller ID     : 0
+Transcript    : Hello. Please, please help me. I'm stuck. The building's coming down. I can hear the walls cracking. I don't know how much longer I can hold on. Please, please just send someone. I don't want to die here.
+Final Emotion : ANGRY
+Distress      : HIGH DISTRESS
+Reason        : fast mode: skipped chunked audio & sound analysis
+==================================================
