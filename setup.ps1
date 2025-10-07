@@ -155,44 +155,58 @@ function Install-EmergencyAI {
         return
     }
     
-    # Download models
-    Write-Log "Downloading AI models..."
-    New-Item -ItemType Directory -Force -Path "WORKING_FILES\models" | Out-Null
+        # Download models
+        Write-Log "Downloading AI models..."
+        New-Item -ItemType Directory -Force -Path "WORKING_FILES\models" | Out-Null
     
-    # Create model download script
-    $downloadScript = @"
+    # Create model download script (downloads whisper-medium)
+    $downloadScript = @'
 import os
-import requests
-import zipfile
 from pathlib import Path
 
-def download_file(url, filename):
-    response = requests.get(url, stream=True)
-    with open(filename, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
+MODELDIR = Path('WORKING_FILES') / 'models' / 'whisper-medium'
+MODELDIR.mkdir(parents=True, exist_ok=True)
 
-models_dir = Path('WORKING_FILES/models')
-models_dir.mkdir(exist_ok=True)
+def already_downloaded(p: Path) -> bool:
+    # A minimal heuristic: model dir contains at least one model file
+    for child in p.iterdir():
+        if child.is_file():
+            return True
+    return False
 
-# Download small Vosk model for development
-vosk_url = 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip'
-vosk_file = models_dir / 'vosk-model-small.zip'
+if already_downloaded(MODELDIR):
+    print('Whisper-medium already present at', MODELDIR)
+else:
+    print('Attempting to download whisper-medium into', MODELDIR)
+    try:
+        # Prefer huggingface_hub snapshot_download (will place files into the target dir)
+        from huggingface_hub import snapshot_download
 
-print('Downloading Vosk model...')
-download_file(vosk_url, vosk_file)
+        print('Using huggingface_hub.snapshot_download to fetch model...')
+        snapshot_download(repo_id='openai/whisper-medium', cache_dir=str(MODELDIR), repo_type='model')
+        print('Downloaded whisper-medium to', MODELDIR)
+    except Exception as e:
+        print('huggingface_hub unavailable or download failed:', e)
+        print('Falling back to forcing faster-whisper to download into HF cache...')
+        try:
+            from faster_whisper import WhisperModel
 
-print('Extracting model...')
-with zipfile.ZipFile(vosk_file, 'r') as zip_ref:
-    zip_ref.extractall(models_dir)
+            # Instantiating will download the model into the Hugging Face cache
+            print('Instantiating faster-whisper WhisperModel("medium") to trigger download (may use ~2GB)...')
+            _ = WhisperModel('medium', device='cpu')
+            print('faster-whisper has downloaded the model into the Hugging Face cache.')
+            print('You can move or symlink the cache contents into', MODELDIR, 'if you want a local copy.')
+        except Exception as e2:
+            print('Failed to trigger faster-whisper download:', e2)
+            print('Please install huggingface_hub or faster-whisper and re-run this script to fetch the model.')
 
-os.remove(vosk_file)
-print('Model download completed!')
-"@
-    
-    $downloadScript | Out-File -FilePath "download_models.py" -Encoding UTF8
-    python download_models.py
-    Remove-Item "download_models.py"
+'@
+
+$downloadScript | Out-File -FilePath "download_models.py" -Encoding UTF8
+        python download_models.py
+        Remove-Item "download_models.py"
+
+        Write-Host "Note: If you plan to use the Whisper model, install ffmpeg on your system (choco install ffmpeg on Windows)." -ForegroundColor Yellow
     
     Write-Success "Emergency AI installation completed!"
     Write-Host "To run the application: .\setup.ps1 run" -ForegroundColor Green

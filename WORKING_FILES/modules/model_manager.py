@@ -27,7 +27,8 @@ class ModelManager:
         if not hasattr(self, 'initialized'):
             self.initialized = True
             self._models = {
-                'vosk_model': None,
+                # Vosk removed
+                'whisper_medium': None,
                 'audio_feature_extractor': None,
                 'wav2vec_model': None,
                 'text_classifier': None,
@@ -54,7 +55,7 @@ class ModelManager:
             try:
                 # Set environment variables first
                 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-                os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+                # Vosk removed; no VOSK_LOG_LEVEL needed
                 
                 # Suppress warnings
                 import warnings
@@ -73,7 +74,7 @@ class ModelManager:
                 
                 # Copy loaded models
                 self._models.update({
-                    'vosk_model': model_loader.vosk_model,
+                    'whisper_medium': getattr(model_loader, 'whisper_medium', None),
                     'audio_feature_extractor': model_loader.audio_feature_extractor,
                     'wav2vec_model': model_loader.wav2vec_model,
                     'text_classifier': model_loader.text_classifier,

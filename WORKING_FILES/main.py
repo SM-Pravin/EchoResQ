@@ -19,7 +19,7 @@ import warnings
 from pathlib import Path
 
 # Environment tweaks should be set early
-os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+# Vosk removed; no VOSK_LOG_LEVEL needed
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 warnings.filterwarnings("ignore")

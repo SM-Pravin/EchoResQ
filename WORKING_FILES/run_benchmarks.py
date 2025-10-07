@@ -447,7 +447,6 @@ def main():
     
     # Suppress verbose logging
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-    os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
     
     print("[ROCKET] Enhanced Emergency AI Performance Benchmarks")
     print("="*60)

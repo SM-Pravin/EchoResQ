@@ -45,7 +45,7 @@ os.environ.setdefault("PARALLEL_MAX_WORKERS", "4")
 os.environ.setdefault("ENABLE_BATCH_PROCESSING", "true")
 os.environ.setdefault("AUDIO_BATCH_SIZE", "8")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+# Vosk removed; no VOSK_LOG_LEVEL needed
 
 # Core imports
 import streamlit as st
@@ -84,7 +84,8 @@ def load_processing_functions():
 def load_dashboard_components():
     """Load dashboard components with caching."""
     try:
-        from modules.visualization_dashboard import DeveloperDashboard, process_audio_file_stream
+        from modules.visualization_dashboard import DeveloperDashboard
+        from analysis_pipeline import process_audio_file_stream
         return DeveloperDashboard, process_audio_file_stream
     except Exception as e:
         st.error(f"Failed to load dashboard components: {e}")
@@ -93,6 +94,29 @@ def load_dashboard_components():
 # Load functions
 process_audio_file = load_processing_functions()
 DeveloperDashboard, process_audio_file_stream = load_dashboard_components()
+
+# If processing functions failed to load at app start (syntax/import error),
+# offer a reload button so the running Streamlit process can attempt to re-import
+# without requiring a manual process restart. This helps recover after fixes
+# to modules like `emotion_audio.py` or `memory_management.py`.
+if process_audio_file is None:
+    with st.sidebar:
+        st.error("Processing functions failed to load. Analysis features are disabled.")
+        if st.button("Reload processing functions"):
+            import traceback as _tb
+            try:
+                # Try reloading the processing functions and dashboard components
+                process_audio_file = load_processing_functions()
+                DeveloperDashboard, process_audio_file_stream = load_dashboard_components()
+                if process_audio_file:
+                    st.success("Processing functions reloaded successfully. Please re-run your analysis action.")
+                    # Rerun so cached resources update
+                    st.experimental_rerun()
+                else:
+                    st.error("Reload completed but processing functions are still unavailable.")
+            except Exception as e:
+                st.error(f"Reload failed: {e}")
+                st.text(_tb.format_exc())
 
 def _inject_base_css(theme: str = "dark"):
     """Inject base CSS with CSS variables supporting dark/light themes.
@@ -250,6 +274,9 @@ def emotion_bar_chart(fused_scores):
         ])
         return df if not df.empty else None
     except Exception:
+        process_audio_file_stream = load_dashboard_components()
+
+        DeveloperDashboard, process_audio_file_stream = load_dashboard_components()
         return None
 
 def chunks_timeline_df(chunks):
@@ -321,13 +348,22 @@ if config.streaming.enable_live_audio:
             config_manager.set('fusion.sensitivity', sensitivity)
             st.success("Config updated!")
     
-    # Initialize streaming
+    # Initialize streaming: import module and use getattr to avoid ImportError when WebRTC is unavailable
+    import modules.streaming_audio as streaming_audio
     if streaming_mode == "Real-time Microphone":
-        from modules.streaming_audio import create_streamlit_audio_interface
-        stream_processor = create_streamlit_audio_interface(config)
+        create_iface = getattr(streaming_audio, "create_streamlit_audio_interface", None)
+        if create_iface is None:
+            st.warning("[WARNING] Real-time audio requires streamlit-webrtc. Install with: pip install streamlit-webrtc")
+            stream_processor = None
+        else:
+            stream_processor = create_iface(config)
     else:
-        from modules.streaming_audio import create_mock_audio_interface
-        stream_processor = create_mock_audio_interface(config)
+        create_mock = getattr(streaming_audio, "create_mock_audio_interface", None)
+        if create_mock is None:
+            st.error("Mock audio interface not available in modules.streaming_audio")
+            stream_processor = None
+        else:
+            stream_processor = create_mock(config)
     
     # Display streaming results
     if stream_processor:
@@ -338,8 +374,8 @@ if config.streaming.enable_live_audio:
         
         # Auto-refresh results
         if st.session_state.get('streaming_active', False):
-            from modules.streaming_audio import display_streaming_results
-            if display_streaming_results(stream_processor, results_placeholder):
+            display_fn = getattr(streaming_audio, "display_streaming_results", None)
+            if display_fn and display_fn(stream_processor, results_placeholder):
                 # Refresh every 500ms when active
                 time.sleep(0.5)
                 st.rerun()

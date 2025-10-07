@@ -476,7 +476,7 @@ def main():
     """Main entry point for stress testing."""
     # Set environment for testing
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-    os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+    # Vosk removed; no VOSK_LOG_LEVEL needed
     
     runner = StressTestRunner()
     results = runner.run_full_stress_test()

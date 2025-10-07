@@ -161,7 +161,7 @@ export MODEL_OPTIMIZATION_TYPE=onnx    # onnx|quantized|torchscript
 
 # Logging (reduce verbosity)
 export TF_CPP_MIN_LOG_LEVEL=3
-export VOSK_LOG_LEVEL=-1
+# Vosk removed; set logging for Whisper or other components as needed
 ```
 
 ### Production Deployment

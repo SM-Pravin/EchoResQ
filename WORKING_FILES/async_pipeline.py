@@ -16,7 +16,7 @@ import threading
 from contextlib import asynccontextmanager
 
 # Environment tweaks should be set early
-os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+# Vosk removed; no VOSK_LOG_LEVEL needed
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 

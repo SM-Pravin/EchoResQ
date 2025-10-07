@@ -20,7 +20,7 @@ except ImportError:
     print("[WARNING] PyAudio not available. Install with: pip install pyaudio")
 
 try:
-    from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
+    from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, RTCConfiguration, MediaStreamConstraints
     import av
     WEBRTC_AVAILABLE = True
 except ImportError:
@@ -281,49 +281,50 @@ class AudioStreamProcessor:
             return 0.0
 
 
-class WebRTCAudioProcessor(AudioProcessorBase):
-    """WebRTC audio processor for streamlit-webrtc."""
-    
-    def __init__(self, stream_processor: AudioStreamProcessor):
-        self.stream_processor = stream_processor
-        self.sample_rate = 16000
-    
-    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        """Process incoming audio frame."""
-        try:
-            # Convert frame to numpy array
-            audio_data = frame.to_ndarray().flatten().astype(np.float32)
-            
-            # Normalize if needed
-            if audio_data.dtype != np.float32:
-                audio_data = audio_data.astype(np.float32) / 32768.0
-            
-            # Add to processor
-            self.stream_processor.add_audio_chunk(audio_data, frame.sample_rate)
-            
-        except Exception as e:
-            print(f"[WARNING] WebRTC processing error: {e}")
+if WEBRTC_AVAILABLE:
+    class WebRTCAudioProcessor(AudioProcessorBase):
+        """WebRTC audio processor for streamlit-webrtc."""
         
-        return frame
+        def __init__(self, stream_processor: AudioStreamProcessor):
+            self.stream_processor = stream_processor
+            self.sample_rate = 16000
+        
+        def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+            """Process incoming audio frame."""
+            try:
+                # Convert frame to numpy array
+                audio_data = frame.to_ndarray().flatten().astype(np.float32)
+                
+                # Normalize if needed
+                if audio_data.dtype != np.float32:
+                    audio_data = audio_data.astype(np.float32) / 32768.0
+                
+                # Add to processor
+                self.stream_processor.add_audio_chunk(audio_data, frame.sample_rate)
+                
+            except Exception as e:
+                print(f"[WARNING] WebRTC processing error: {e}")
+            
+            return frame
 
 
-def create_streamlit_audio_interface(config=None) -> Optional[AudioStreamProcessor]:
-    """Create Streamlit interface for real-time audio processing."""
-    if not WEBRTC_AVAILABLE:
-        st.error("[WARNING] Real-time audio requires streamlit-webrtc. Install with: pip install streamlit-webrtc")
-        return None
-    
-    config = config or get_config_manager().config
-    
-    # Create processor
-    stream_processor = AudioStreamProcessor(config)
-    
-    # WebRTC settings
-    client_settings = ClientSettings(
-        rtc_configuration={
+    def create_streamlit_audio_interface(config=None) -> Optional[AudioStreamProcessor]:
+        """Create Streamlit interface for real-time audio processing."""
+        if not WEBRTC_AVAILABLE:
+            st.error("[WARNING] Real-time audio requires streamlit-webrtc. Install with: pip install streamlit-webrtc")
+            return None
+        
+        config = config or get_config_manager().config
+        
+        # Create processor
+        stream_processor = AudioStreamProcessor(config)
+        
+        # WebRTC settings
+        rtc_configuration = RTCConfiguration({
             "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-        },
-        media_stream_constraints={
+        })
+        
+        media_stream_constraints = MediaStreamConstraints({
             "video": False,
             "audio": {
                 "sampleRate": config.audio.sample_rate,
@@ -332,25 +333,24 @@ def create_streamlit_audio_interface(config=None) -> Optional[AudioStreamProcess
                 "echoCancellation": True,
                 "noiseSuppression": True
             }
-        }
-    )
-    
-    # Create WebRTC streamer
-    webrtc_ctx = webrtc_streamer(
-        key="emergency-audio-stream",
-        mode=st.cache_data,
-        audio_processor_factory=lambda: WebRTCAudioProcessor(stream_processor),
-        client_settings=client_settings,
-        async_processing=True
-    )
-    
-    # Handle streaming state
-    if webrtc_ctx.state.playing:
-        stream_processor.start_processing()
-        return stream_processor
-    else:
-        stream_processor.stop_processing()
-        return None
+        })
+        
+        # Create WebRTC streamer
+        webrtc_ctx = webrtc_streamer(
+            key="emergency-audio-stream",
+            audio_processor_factory=lambda: WebRTCAudioProcessor(stream_processor),
+            rtc_configuration=rtc_configuration,
+            media_stream_constraints=media_stream_constraints,
+            async_processing=True
+        )
+        
+        # Handle streaming state
+        if webrtc_ctx.state.playing:
+            stream_processor.start_processing()
+            return stream_processor
+        else:
+            stream_processor.stop_processing()
+            return None
 
 
 def create_mock_audio_interface(config=None) -> AudioStreamProcessor:

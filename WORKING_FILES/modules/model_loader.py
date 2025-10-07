@@ -15,17 +15,12 @@ _models = {}
 
 # Environment setup
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
 
 # Suppress warnings early
 import warnings
 warnings.filterwarnings("ignore")
 
-try:
-    from vosk import SetLogLevel
-    SetLogLevel(-1)
-except Exception:
-    pass
+# Vosk has been removed; use faster-whisper for transcription
 
 try:
     import tensorflow as tf
@@ -260,7 +255,7 @@ print(device_manager.get_device_summary())
 
 # Model paths - adjusted for actual structure
 BASE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
-VOSK_PATH = os.path.join(BASE, "vosk-model-large-en-us")
+VOSK_PATH = None
 WAV2VEC2_PATH = os.path.join(BASE, "wav2vec2")
 DISTILROBERTA_PATH = os.path.join(BASE, "distilroberta")
 YAMNET_PATH = os.path.join(BASE, "yamnet")
@@ -270,7 +265,8 @@ def _init_model_dict():
     global _models
     if not _models:
         _models = {
-            'vosk_model': None,
+                'vosk_model': None,
+            'whisper_medium': None,
             'audio_feature_extractor': None,
             'wav2vec_model': None,
             'wav2vec_onnx': None,
@@ -286,15 +282,9 @@ def _init_model_dict():
 
 
 def _load_vosk():
-    try:
-        from vosk import Model as VoskModel
-        if os.path.isdir(VOSK_PATH):
-            _models['vosk_model'] = VoskModel(VOSK_PATH)
-            print(" Vosk model loaded")
-        else:
-            print(f" WARNING: Vosk model not found at: {VOSK_PATH}")
-    except Exception as e:
-        print(f" WARNING: Failed to initialize Vosk model: {e}")
+    # Vosk removed from runtime. Keep a stub for compatibility (no-op).
+    _models['vosk_model'] = None
+    print(" [INFO] Vosk support removed; skipping Vosk model load")
 
 
 def _load_wav2vec2():
@@ -497,10 +487,63 @@ def _load_embedder():
                 print(f" WARNING: Failed to load SentenceTransformer: {e}")
     except Exception as e:
         print(f" WARNING: sentence-transformers not available: {e}")
+def _load_whisper_medium():
+    """Load Whisper (faster-whisper) medium model for transcription.
+    This loader tries to use GPU if available via device manager; falls back to CPU.
+    """
+    try:
+        # lazy import to avoid adding heavy dependency at import time
+        from faster_whisper import WhisperModel
+    except Exception as e:
+        print(f" [WARNING] faster-whisper not available: {e}")
+        return
+
+    # prefer local model folder if present but only if it's in ctranslate2/converted format
+    local_whisper = os.path.join(BASE, "whisper-medium")
+    try:
+        model_path = "medium"
+        used_local = False
+
+        if os.path.isdir(local_whisper):
+            # Look for a converted ctranslate2 model directory that contains model.bin
+            ctranslate2_candidate = None
+            for child in os.listdir(local_whisper):
+                child_path = os.path.join(local_whisper, child)
+                if os.path.isdir(child_path) and os.path.isfile(os.path.join(child_path, 'model.bin')):
+                    ctranslate2_candidate = child_path
+                    break
+
+            # Also accept the top-level local_whisper if it itself contains model.bin
+            if ctranslate2_candidate is None and os.path.isfile(os.path.join(local_whisper, 'model.bin')):
+                ctranslate2_candidate = local_whisper
+
+            if ctranslate2_candidate is not None:
+                model_path = ctranslate2_candidate
+                used_local = True
+                print(f" [INFO] Found converted ctranslate2 Whisper model at: {model_path}")
+            else:
+                print(f" [INFO] Local whisper snapshot found at {local_whisper}, but no converted model (model.bin) was detected. Falling back to HF model name 'medium'.")
+
+        # Device selection: use CUDA if available else CPU
+        device = TORCH_DEVICE
+        fw_device = 'cuda' if device.type == 'cuda' else 'cpu'
+
+        wm = WhisperModel(model_path, device=fw_device, compute_type="float32")
+        _models['whisper_medium'] = wm
+        print(f" [OK] Whisper (faster-whisper) loaded (device: {fw_device}) from: {model_path}")
+        if used_local:
+            print(" [OK] Using local converted model; no further downloads required.")
+    except Exception as e:
+        import traceback
+        print(f" [WARNING] Failed to load Whisper medium from {model_path}: {e}")
+        traceback.print_exc()
+        _models['whisper_medium'] = None
 
 
 _MODEL_LOADERS = {
+    # Vosk loader removed; keep stub present for compatibility
     'vosk_model': _load_vosk,
+    'whisper_medium': _load_whisper_medium,
     'audio_feature_extractor': _load_wav2vec2,
     'wav2vec_model': _load_wav2vec2,
     'wav2vec_onnx': _load_wav2vec2_onnx,
@@ -535,7 +578,7 @@ def _load_models():
     print("[ROCKET] Initializing models with enhanced device management...")
     
     # Load core models
-    for key in ['vosk_model', 'audio_feature_extractor', 'wav2vec_model', 'text_classifier', 'yamnet_model', 'yamnet_classes', 'embedder']:
+    for key in ['whisper_medium', 'audio_feature_extractor', 'wav2vec_model', 'text_classifier', 'yamnet_model', 'yamnet_classes', 'embedder']:
         _ensure_model(key)
     
     # Load ONNX models if enabled
@@ -564,26 +607,28 @@ def is_loaded():
     return _models_initialized
 
 # Initialize compatibility variables (lazy)
-vosk_model = None
 audio_feature_extractor = None
 wav2vec_model = None
 text_classifier = None
 yamnet_model = None
 yamnet_classes = []
 embedder = None
+whisper_medium = None
 
 def _ensure_compatibility_lazy():
-    global vosk_model, audio_feature_extractor, wav2vec_model, text_classifier
+    global audio_feature_extractor, wav2vec_model, text_classifier
     global yamnet_model, yamnet_classes, embedder
-    if vosk_model is None or audio_feature_extractor is None or wav2vec_model is None or text_classifier is None or yamnet_model is None or not yamnet_classes or embedder is None:
+    global whisper_medium
+    if audio_feature_extractor is None or wav2vec_model is None or text_classifier is None or yamnet_model is None or not yamnet_classes or embedder is None:
         m = get_models()
-        vosk_model = m['vosk_model']
         audio_feature_extractor = m['audio_feature_extractor']
         wav2vec_model = m['wav2vec_model']
         text_classifier = m['text_classifier']
         yamnet_model = m['yamnet_model']
         yamnet_classes = m['yamnet_classes']
         embedder = m['embedder']
+        # whisper_medium may be absent if faster-whisper not installed
+        whisper_medium = m.get('whisper_medium') if m else None
 
 
 # Device management API

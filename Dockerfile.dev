@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     portaudio19-dev \
     libffi-dev \
     libssl-dev \
+    ffmpeg \
     curl \
     wget \
     git \
@@ -41,19 +42,21 @@ RUN pip install --upgrade pip setuptools wheel && \
 # Copy application code
 COPY . /app/
 
-# Create necessary directories
-RUN mkdir -p /app/logs /app/tmp_chunks /app/uploads /app/models
-
-# Download development models (smaller versions)
-RUN echo '#!/bin/bash\n\
-set -e\n\
-echo "Downloading development models..."\n\
-mkdir -p models/vosk-model-small-en-us-0.15\n\
-wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\n\
-unzip -q vosk-model-small-en-us-0.15.zip -d models/\n\
-rm vosk-model-small-en-us-0.15.zip\n\
-echo "Development models ready!"\n\
-' > /app/download_dev_models.sh && chmod +x /app/download_dev_models.sh
+# Create necessary directories and development model script
+RUN mkdir -p /app/logs /app/tmp_chunks /app/uploads /app/models && \
+    printf '%s\n' \
+    '#!/bin/bash' \
+    'set -e' \
+    'echo "Downloading development models..."' \
+    'mkdir -p models/vosk-model-small-en-us-0.15' \
+    'mkdir -p models/whisper-medium' \
+    'echo "Note: Vosk and Whisper models will be downloaded on first run if not present."' \
+    'echo "For faster development startup, you may pre-download models:"' \
+    'echo "  - Vosk: https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"' \
+    'echo "  - Whisper models are downloaded automatically by faster-whisper"' \
+    'echo "Development models ready!"' \
+    > /app/download_dev_models.sh && \
+    chmod +x /app/download_dev_models.sh
 
 # Expose ports for development
 EXPOSE 8501 8000 5678

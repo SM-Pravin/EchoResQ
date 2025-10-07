@@ -17,33 +17,33 @@ WORKDIR /models
 
 # Create model download script
 RUN echo '#!/bin/bash\n\
-set -e\n\
-echo "Downloading Emergency AI models..."\n\
-\n\
-# Create model directories\n\
-mkdir -p vosk-models wav2vec2 yamnet distilroberta\n\
-\n\
-# Download Vosk models (English)\n\
-echo "Downloading Vosk models..."\n\
-wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\n\
-unzip -q vosk-model-small-en-us-0.15.zip -d vosk-models/\n\
-rm vosk-model-small-en-us-0.15.zip\n\
-\n\
-wget -q https://alphacephei.com/vosk/models/vosk-model-medium-en-us-0.22.zip\n\
-unzip -q vosk-model-medium-en-us-0.22.zip -d vosk-models/\n\
-rm vosk-model-medium-en-us-0.22.zip\n\
-\n\
-# Download YAMNet for sound classification\n\
-echo "Downloading YAMNet model..."\n\
-wget -q https://tfhub.dev/google/yamnet/1?tf-hub-format=compressed -O yamnet.tar.gz\n\
-tar -xzf yamnet.tar.gz -C yamnet/\n\
-rm yamnet.tar.gz\n\
-\n\
-# Download class labels\n\
-wget -q https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv -O yamnet/yamnet_class_map.csv\n\
-\n\
-echo "Model downloads completed!"\n\
-' > download_models.sh && chmod +x download_models.sh
+    set -e\n\
+    echo "Downloading Emergency AI models..."\n\
+    \n\
+    # Create model directories\n\
+    mkdir -p vosk-models wav2vec2 yamnet distilroberta\n\
+    \n\
+    # Download Vosk models (English)\n\
+    echo "Downloading Vosk models..."\n\
+    wget -q https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip\n\
+    unzip -q vosk-model-small-en-us-0.15.zip -d vosk-models/\n\
+    rm vosk-model-small-en-us-0.15.zip\n\
+    \n\
+    wget -q https://alphacephei.com/vosk/models/vosk-model-medium-en-us-0.22.zip\n\
+    unzip -q vosk-model-medium-en-us-0.22.zip -d vosk-models/\n\
+    rm vosk-model-medium-en-us-0.22.zip\n\
+    \n\
+    # Download YAMNet for sound classification\n\
+    echo "Downloading YAMNet model..."\n\
+    wget -q https://tfhub.dev/google/yamnet/1?tf-hub-format=compressed -O yamnet.tar.gz\n\
+    tar -xzf yamnet.tar.gz -C yamnet/\n\
+    rm yamnet.tar.gz\n\
+    \n\
+    # Download class labels\n\
+    wget -q https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv -O yamnet/yamnet_class_map.csv\n\
+    \n\
+    echo "Model downloads completed!"\n\
+    ' > download_models.sh && chmod +x download_models.sh
 
 # Download models
 RUN ./download_models.sh
@@ -87,7 +87,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DEBIAN_FRONTEND=noninteractive \
     TF_CPP_MIN_LOG_LEVEL=3 \
-    VOSK_LOG_LEVEL=-1 \
+    # Vosk removed; whisper will be used for transcription
     CUDA_VISIBLE_DEVICES="" \
     STREAMLIT_SERVER_PORT=8501 \
     STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
@@ -98,6 +98,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y \
     libasound2 \
     portaudio19-dev \
+    ffmpeg \
     libgomp1 \
     libglib2.0-0 \
     libsm6 \
@@ -117,9 +118,9 @@ WORKDIR /app
 COPY --from=python-builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy models from model-builder stage
+# Copy models from model-builder stage (we'll download whisper-medium instead of Vosk)
 COPY --from=model-builder /models /app/models
-RUN chown -R emergency:emergency /app/models
+RUN chown -R emergency:emergency /app/models || true
 
 # Copy application code
 COPY WORKING_FILES/ /app/WORKING_FILES/
@@ -146,11 +147,11 @@ CMD ["streamlit", "run", "/app/WORKING_FILES/app_streamlit.py", "--server.port=8
 
 # Labels for metadata
 LABEL maintainer="Emergency AI Team <contact@emergency-ai.com>" \
-      version="1.0.0" \
-      description="Emergency AI - Real-time audio analysis system" \
-      org.opencontainers.image.title="Emergency AI" \
-      org.opencontainers.image.description="Advanced real-time emergency audio analysis system with AI-powered distress detection" \
-      org.opencontainers.image.version="1.0.0" \
-      org.opencontainers.image.source="https://github.com/SM-Pravin/EchoResQ" \
-      org.opencontainers.image.documentation="https://github.com/SM-Pravin/EchoResQ/wiki" \
-      org.opencontainers.image.licenses="MIT"
+    version="1.0.0" \
+    description="Emergency AI - Real-time audio analysis system" \
+    org.opencontainers.image.title="Emergency AI" \
+    org.opencontainers.image.description="Advanced real-time emergency audio analysis system with AI-powered distress detection" \
+    org.opencontainers.image.version="1.0.0" \
+    org.opencontainers.image.source="https://github.com/SM-Pravin/EchoResQ" \
+    org.opencontainers.image.documentation="https://github.com/SM-Pravin/EchoResQ/wiki" \
+    org.opencontainers.image.licenses="MIT"

@@ -173,7 +173,8 @@ class SystemValidator:
             'yamnet': ['yamnet.h5', 'yamnet/saved_model.pb'],
             'wav2vec2': ['wav2vec2/config.json', 'wav2vec2/model.safetensors'],
             'distilroberta': ['distilroberta/config.json', 'distilroberta/model.safetensors'],
-            'vosk': ['vosk-model-small-en-us-0.15', 'vosk-model-medium-en-us', 'vosk-model-large-en-us']
+            'vosk': ['vosk-model-small-en-us-0.15', 'vosk-model-medium-en-us', 'vosk-model-large-en-us'],
+            'whisper': ['whisper-medium', 'whisper-medium.en']
         }
         
         model_status = {}

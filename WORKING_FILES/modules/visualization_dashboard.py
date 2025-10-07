@@ -9,10 +9,23 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import librosa
-import librosa.display
-import soundfile as sf
 from typing import Dict, List, Any, Optional, Tuple
+
+# Optional imports with fallbacks
+try:
+    import librosa
+    import librosa.display
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    LIBROSA_AVAILABLE = False
+    print('[WARNING] librosa not available in visualization_dashboard. Some waveform features disabled. Install with: pip install librosa')
+
+try:
+    import soundfile as sf
+    SF_AVAILABLE = True
+except ImportError:
+    SF_AVAILABLE = False
+    print('[WARNING] soundfile not available in visualization_dashboard. Some audio loading features disabled. Install with: pip install soundfile')
 import json
 import os
 from datetime import datetime, timedelta
@@ -39,6 +52,10 @@ class WaveformVisualizer:
         """Create interactive waveform plot with event overlays."""
         
         # Load audio
+        if not LIBROSA_AVAILABLE:
+            st.error("Waveform visualization requires librosa. Install with: pip install librosa")
+            return go.Figure()
+        
         try:
             audio, sr = librosa.load(audio_file, sr=None)
             duration = len(audio) / sr

@@ -20,7 +20,7 @@ models:
   use_onnx_cuda: "auto"  # "true"|"false"|"auto"
   
   # Model-specific paths
-  vosk_model_path: "models/vosk-model-medium-en-us"
+  whisper_model_path: "models/whisper-medium"
   yamnet_model_path: "models/yamnet"
   wav2vec2_model_path: "models/wav2vec2"
   distilroberta_model_path: "models/distilroberta"

@@ -41,6 +41,7 @@ class ModelConfig:
     onnx_model_dir: str = "models/optimized"
     use_onnx_cuda: str = "auto"
     vosk_model_path: str = "models/vosk-model-medium-en-us"
+    whisper_model_path: str = "models/whisper-medium"
     yamnet_model_path: str = "models/yamnet"
     wav2vec2_model_path: str = "models/wav2vec2"
     distilroberta_model_path: str = "models/distilroberta"

@@ -956,6 +956,6 @@ def run_memory_profiling() -> Dict[str, Any]:
 if __name__ == "__main__":
     # Set optimal environment for benchmarking
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-    os.environ.setdefault("VOSK_LOG_LEVEL", "-1")
+    # Vosk removed
     
     run_full_benchmark()

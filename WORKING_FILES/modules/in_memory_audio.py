@@ -13,8 +13,172 @@ import io
 from typing import Dict, List, Optional, Any, Union, Tuple
 from contextlib import contextmanager
 import numpy as np
-import librosa
-import soundfile as sf
+# soundfile is optional; provide a lightweight fallback for basic WAV I/O
+try:
+    import soundfile as sf
+    SF_AVAILABLE = True
+except Exception:
+    SF_AVAILABLE = False
+    print('[WARNING] soundfile not available. Falling back to scipy/wave reader for basic WAV support. Install with: pip install soundfile')
+    try:
+        from scipy.io import wavfile as _scipy_wavfile
+        _SCIPY_AVAILABLE = True
+    except Exception:
+        _SCIPY_AVAILABLE = False
+
+    import wave as _wave
+    import contextlib as _contextlib
+
+    def _sf_read(path_or_file):
+        """Read WAV data from a path or file-like object. Returns (data, samplerate).
+
+        This is a minimal fallback and supports only PCM WAV. For broader format
+        support (FLAC/OGG/MP3) install `soundfile`.
+        """
+        # If it's a path string, try scipy first (if available)
+        if isinstance(path_or_file, (str, bytes)):
+            p = path_or_file
+            if _SCIPY_AVAILABLE:
+                sr, data = _scipy_wavfile.read(p)
+                data = data.astype('float32')
+                # Normalize integer PCM to float32 range
+                if data.dtype.kind in ('i', 'u'):
+                    maxv = float(2 ** (8 * data.dtype.itemsize - 1))
+                    data = data.astype('float32') / maxv
+                return data, int(sr)
+            else:
+                # Use wave module
+                with _contextlib.closing(_wave.open(p, 'rb')) as wf:
+                    sr = wf.getframerate()
+                    frames = wf.readframes(wf.getnframes())
+                    import numpy as _np
+                    # Interpret bytes according to sample width
+                    sampwidth = wf.getsampwidth()
+                    dtype = None
+                    if sampwidth == 1:
+                        dtype = _np.uint8
+                    elif sampwidth == 2:
+                        dtype = _np.int16
+                    elif sampwidth == 4:
+                        dtype = _np.int32
+                    else:
+                        # fallback: return raw bytes as float32 zeros
+                        return _np.frombuffer(frames, dtype=_np.float32), sr
+                    data = _np.frombuffer(frames, dtype=dtype).astype(_np.float32)
+                    if sampwidth != 1:
+                        maxv = float(2 ** (8 * sampwidth - 1))
+                        data = data / maxv
+                    return data, int(sr)
+
+        # file-like object (BytesIO etc.)
+        try:
+            b = path_or_file.read()
+        except Exception:
+            raise ValueError('Unsupported file-like object for audio read')
+
+        # Try scipy from buffer
+        import io as _io
+        bio = _io.BytesIO(b)
+        if _SCIPY_AVAILABLE:
+            sr, data = _scipy_wavfile.read(bio)
+            data = data.astype('float32')
+            if data.dtype.kind in ('i', 'u'):
+                maxv = float(2 ** (8 * data.dtype.itemsize - 1))
+                data = data.astype('float32') / maxv
+            return data, int(sr)
+
+        # wave from buffer
+        with _contextlib.closing(_wave.open(bio, 'rb')) as wf:
+            sr = wf.getframerate()
+            frames = wf.readframes(wf.getnframes())
+            import numpy as _np
+            sampwidth = wf.getsampwidth()
+            dtype = None
+            if sampwidth == 1:
+                dtype = _np.uint8
+            elif sampwidth == 2:
+                dtype = _np.int16
+            elif sampwidth == 4:
+                dtype = _np.int32
+            else:
+                return _np.frombuffer(frames, dtype=_np.float32), sr
+            data = _np.frombuffer(frames, dtype=dtype).astype(_np.float32)
+            if sampwidth != 1:
+                maxv = float(2 ** (8 * sampwidth - 1))
+                data = data / maxv
+            return data, int(sr)
+
+    # Provide a minimal write if other code expects sf.write (not extensively used)
+    def _sf_write(path, data, samplerate):
+        # Use scipy or wave
+        import numpy as _np
+        arr = _np.asarray(data)
+        if _SCIPY_AVAILABLE:
+            _scipy_wavfile.write(path, int(samplerate), arr)
+            return
+        # wave writer
+        with _contextlib.closing(_wave.open(path, 'wb')) as wf:
+            wf.setnchannels(1 if arr.ndim == 1 else arr.shape[1])
+            wf.setsampwidth(2)
+            wf.setframerate(int(samplerate))
+            # Convert to int16 PCM
+            maxv = float(2 ** 15 - 1)
+            intdata = (arr * maxv).astype(_np.int16)
+            wf.writeframes(intdata.tobytes())
+
+    # Minimal namespace replacement
+    class _SoundFileFallback:
+        read = staticmethod(_sf_read)
+        write = staticmethod(_sf_write)
+
+    sf = _SoundFileFallback()
+
+# librosa is optional; provide a lightweight fallback using soundfile + numpy
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except Exception:
+    LIBROSA_AVAILABLE = False
+    print('[WARNING] librosa not available. Falling back to soundfile + numpy for basic audio I/O. Install with: pip install librosa')
+
+    def _load_with_soundfile(path_or_file, sr=None, mono=True):
+        # soundfile accepts path or file-like
+        data, srate = sf.read(path_or_file)
+        # Convert multi-channel to mono if requested
+        if data.ndim > 1 and mono:
+            data = np.mean(data, axis=1)
+        # Resample if target sr provided
+        if sr is not None and srate != sr and len(data) > 0:
+            duration = len(data) / float(srate)
+            new_len = int(max(1, round(duration * sr)))
+            old_times = np.linspace(0, duration, num=len(data))
+            new_times = np.linspace(0, duration, num=new_len)
+            data = np.interp(new_times, old_times, data).astype(np.float32)
+            srate = sr
+        return data.astype(np.float32), srate
+
+    def _to_mono(data):
+        if data.ndim == 1:
+            return data
+        return np.mean(data, axis=1)
+
+    def _resample(data, orig_sr, target_sr):
+        if orig_sr == target_sr or len(data) == 0:
+            return data
+        duration = len(data) / float(orig_sr)
+        new_len = int(max(1, round(duration * target_sr)))
+        old_times = np.linspace(0, duration, num=len(data))
+        new_times = np.linspace(0, duration, num=new_len)
+        return np.interp(new_times, old_times, data).astype(np.float32)
+
+    # Create a minimal librosa-like namespace so existing calls (librosa.load, .to_mono, .resample)
+    # continue to work without changing remainder of the module.
+    class _LibrosaFallback:
+        load = staticmethod(_load_with_soundfile)
+        to_mono = staticmethod(_to_mono)
+        resample = staticmethod(_resample)
+
+    librosa = _LibrosaFallback()
 
 # Audio processing constants
 DEFAULT_SR = 16000

@@ -230,7 +230,7 @@ results = processor.process_batch_async(items, processor_func)
 - `AUDIO_BATCH_SIZE`: Default batch size
 - `PARALLEL_MAX_WORKERS`: Maximum parallel workers
 - `CHUNK_SIZE_SECONDS`: Default chunk duration
-- `VOSK_LOG_LEVEL`: Speech recognition logging level
+- Vosk removed; use `faster-whisper` logging/configuration as needed for transcription.
 
 ### Runtime Configuration
 - Batch processing configuration through `BatchProcessingConfig`
